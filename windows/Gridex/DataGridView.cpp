@@ -115,11 +115,35 @@ namespace winrt::Gridex::implementation
             });
             contextMenu.Items().Append(deleteItem);
 
-            // Gate Delete on read-only mode + row selection at open time so
-            // the menu reflects the grid's actual state each right-click.
-            contextMenu.Opening([this, deleteItem](auto&&, auto&&)
+            // "View Relationship" is an opt-in item: stays Collapsed until a
+            // host wires OnViewRelationshipsRequested. OSS builds never set
+            // it, so the menu only shows Refresh + Delete there. Enterprise
+            // builds wire it per connection (relational DBs only).
+            auto viewRelSeparator = muxc::MenuFlyoutSeparator{};
+            contextMenu.Items().Append(viewRelSeparator);
+
+            muxc::MenuFlyoutItem viewRelItem;
+            viewRelItem.Text(L"View Relationship");
+            muxc::FontIcon viewRelIcon;
+            viewRelIcon.Glyph(L"\xE71B"); // Link
+            viewRelItem.Icon(viewRelIcon);
+            viewRelItem.Click([this](auto&&, auto&&)
+            {
+                if (OnViewRelationshipsRequested) OnViewRelationshipsRequested();
+            });
+            contextMenu.Items().Append(viewRelItem);
+
+            // Gate Delete + View Relationship at flyout open time so the
+            // menu reflects the grid's actual state each right-click.
+            contextMenu.Opening([this, deleteItem, viewRelItem, viewRelSeparator](auto&&, auto&&)
             {
                 deleteItem.IsEnabled(!readOnly_ && selectedRow_ >= 0);
+                bool showViewRel = static_cast<bool>(OnViewRelationshipsRequested);
+                auto vis = showViewRel ? mux::Visibility::Visible
+                                       : mux::Visibility::Collapsed;
+                viewRelSeparator.Visibility(vis);
+                viewRelItem.Visibility(vis);
+                viewRelItem.IsEnabled(showViewRel && selectedRow_ >= 0);
             });
 
             this->ContextFlyout(contextMenu);

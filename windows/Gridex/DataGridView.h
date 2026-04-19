@@ -52,6 +52,13 @@ namespace winrt::Gridex::implementation
         std::function<void(const std::wstring& refTable,
                            const std::wstring& refSchema)> OnForeignKeyClicked;
 
+        // Callback when user picks "View Relationship" from the context
+        // menu. Opt-in extension point — the menu item stays Collapsed
+        // until a host wires this, so OSS builds see no visible item.
+        // Host (WorkspacePage) resolves current table/schema + selected
+        // row's PK from its own state and opens the relationship dialog.
+        std::function<void()> OnViewRelationshipsRequested;
+
         // Get selected row data for copy
         const DBModels::TableRow* GetSelectedRow() const;
 

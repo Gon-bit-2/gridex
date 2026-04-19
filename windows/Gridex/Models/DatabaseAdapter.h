@@ -93,6 +93,29 @@ namespace DBModels
         virtual std::wstring serverVersion() = 0;
         virtual std::wstring currentDatabase() = 0;
 
+        // ── SQL string assembly helpers ─────────────
+        // Quote a literal value for this DB engine's SQL grammar, e.g.
+        // O'Brien → 'O''Brien'. Used by callers that assemble ad-hoc
+        // WHERE clauses outside the adapter's own CRUD path (enterprise
+        // row-relationship graph builds SELECT ... WHERE col IN (...)).
+        // Default throws — non-SQL adapters (Mongo, Redis) inherit the
+        // default so accidental calls fail loudly instead of silently
+        // producing wrong SQL.
+        virtual std::wstring quoteSqlLiteral(const std::wstring& /*value*/) const
+        {
+            throw DatabaseError(DatabaseError::Code::Unknown,
+                "quoteSqlLiteral not supported on this adapter");
+        }
+
+        // Quote an identifier (table / column / schema) for this engine's
+        // grammar: PostgreSQL/SQLite "name", MySQL `name`, MSSQL [name].
+        // Same rationale and default-throw semantics as quoteSqlLiteral.
+        virtual std::wstring quoteSqlIdentifier(const std::wstring& /*name*/) const
+        {
+            throw DatabaseError(DatabaseError::Code::Unknown,
+                "quoteSqlIdentifier not supported on this adapter");
+        }
+
         // ── Adapter-specific tuning (default: no-op) ───
         // Redis uses this to set the SCAN MATCH pattern for fetchRows.
         // SQL adapters ignore it. Pass "*" or empty to disable filtering.

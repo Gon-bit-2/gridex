@@ -64,6 +64,10 @@ namespace DBModels
         std::wstring serverVersion() override;
         std::wstring currentDatabase() override;
 
+        // ── SQL string assembly ─────────────────────
+        std::wstring quoteSqlLiteral(const std::wstring& value) const override;
+        std::wstring quoteSqlIdentifier(const std::wstring& name) const override;
+
     private:
         PGconn* conn_ = nullptr;
         bool connected_ = false;
