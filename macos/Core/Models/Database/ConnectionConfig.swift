@@ -28,6 +28,9 @@ struct ConnectionConfig: Codable, Sendable, Hashable, Identifiable {
     // SSH Tunnel
     var sshConfig: SSHTunnelConfig?
 
+    // MCP Access
+    var mcpMode: MCPConnectionMode
+
     init(
         id: UUID = UUID(),
         name: String,
@@ -43,7 +46,8 @@ struct ConnectionConfig: Codable, Sendable, Hashable, Identifiable {
         sslCertPath: String? = nil,
         sslCACertPath: String? = nil,
         filePath: String? = nil,
-        sshConfig: SSHTunnelConfig? = nil
+        sshConfig: SSHTunnelConfig? = nil,
+        mcpMode: MCPConnectionMode = .locked
     ) {
         self.id = id
         self.name = name
@@ -60,6 +64,7 @@ struct ConnectionConfig: Codable, Sendable, Hashable, Identifiable {
         self.sslCACertPath = sslCACertPath
         self.filePath = filePath
         self.sshConfig = sshConfig
+        self.mcpMode = mcpMode
     }
 
     var displayHost: String {
