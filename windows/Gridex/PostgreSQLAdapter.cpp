@@ -51,6 +51,19 @@ namespace DBModels
         return escaped;
     }
 
+    // Public wrappers over the existing utf8 helpers. Return wstring so
+    // callers that assemble wide SQL (enterprise row graph) don't have
+    // to UTF-8 round-trip themselves.
+    std::wstring PostgreSQLAdapter::quoteSqlLiteral(const std::wstring& value) const
+    {
+        return fromUtf8(quoteLiteral(value));
+    }
+
+    std::wstring PostgreSQLAdapter::quoteSqlIdentifier(const std::wstring& name) const
+    {
+        return fromUtf8(quoteIdentifier(name));
+    }
+
     void PostgreSQLAdapter::ensureConnected() const
     {
         if (!connected_ || !conn_)

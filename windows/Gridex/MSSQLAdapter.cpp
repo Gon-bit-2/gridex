@@ -71,6 +71,17 @@ namespace DBModels
         return escaped;
     }
 
+    // Public wrappers — wstring in, wstring out. Delegate to utf8 helpers.
+    std::wstring MSSQLAdapter::quoteSqlLiteral(const std::wstring& value) const
+    {
+        return fromUtf8(quoteLiteral(value));
+    }
+
+    std::wstring MSSQLAdapter::quoteSqlIdentifier(const std::wstring& name) const
+    {
+        return fromUtf8(quoteIdentifier(name));
+    }
+
     void MSSQLAdapter::ensureConnected() const
     {
         if (!connected_ || !hDbc_)
