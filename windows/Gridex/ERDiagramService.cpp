@@ -1,5 +1,6 @@
 #include <windows.h>
 #include "Models/ERDiagramService.h"
+#include <atomic>
 #include <fstream>
 #include <sstream>
 #include <set>
@@ -32,7 +33,7 @@ namespace DBModels
     }
 
     // Replace anything not [A-Za-z0-9_] with '_'. Prefix t_ if starts with digit.
-    static std::wstring sanitizeIdentifier(const std::wstring& name)
+    std::wstring ERDiagramService::SanitizeIdentifier(const std::wstring& name)
     {
         std::wstring out;
         out.reserve(name.size());
@@ -55,7 +56,7 @@ namespace DBModels
     // "height", "label". When a SQL column matches one of these, d2 thinks
     // we're setting an attribute and barfs ("non-integer width 'bigint'").
     // Wrap the identifier in double quotes to force literal interpretation.
-    static bool isD2Reserved(const std::wstring& name)
+    bool ERDiagramService::IsD2Reserved(const std::wstring& name)
     {
         // Lowercase compare since SQL is case-insensitive but d2 is not
         std::wstring lower;
@@ -77,11 +78,34 @@ namespace DBModels
     }
 
     // Quote a column identifier if it collides with a d2 reserved keyword.
-    static std::wstring quoteIfReserved(const std::wstring& name)
+    std::wstring ERDiagramService::QuoteIfReserved(const std::wstring& name)
     {
-        if (isD2Reserved(name))
+        if (IsD2Reserved(name))
             return L"\"" + name + L"\"";
         return name;
+    }
+
+    // Escape a string for use as a D2 quoted label. Wraps in "…" and escapes
+    // embedded quotes, backslashes, and newlines so labels with pk values
+    // like O'Brien, paths, or multi-line text don't break the d2 parser.
+    std::wstring ERDiagramService::EscapeD2Label(const std::wstring& text)
+    {
+        std::wstring out;
+        out.reserve(text.size() + 2);
+        out += L'"';
+        for (wchar_t c : text)
+        {
+            switch (c)
+            {
+            case L'"':  out += L"\\\""; break;
+            case L'\\': out += L"\\\\"; break;
+            case L'\n': out += L"\\n";  break;
+            case L'\r': break;  // strip
+            default:    out += c;       break;
+            }
+        }
+        out += L'"';
+        return out;
     }
 
     // Simplify type strings: "varchar(255)" -> "varchar",
@@ -145,8 +169,12 @@ namespace DBModels
         return L"";
     }
 
-    // Build %TEMP%\gridex\<random>.<extension>
-    static std::wstring tempPath(const std::wstring& extension)
+    // Build %TEMP%\gridex\<prefix><tick>_<counter>.<extension>.
+    // Counter is a process-wide atomic so concurrent callers (ER diagram +
+    // row graph) don't collide on filename. Prefix defaults to "er_" to
+    // preserve prior behavior; distinct prefixes namespace filenames.
+    std::wstring ERDiagramService::TempPath(const std::wstring& extension,
+                                            const std::wstring& prefix)
     {
         wchar_t tmp[MAX_PATH] = {};
         DWORD len = GetTempPathW(MAX_PATH, tmp);
@@ -155,16 +183,15 @@ namespace DBModels
         std::wstring dir = std::wstring(tmp) + L"gridex";
         CreateDirectoryW(dir.c_str(), nullptr);
 
-        // Random suffix using GetTickCount + counter
-        static int counter = 0;
-        wchar_t name[64];
-        swprintf_s(name, 64, L"\\er_%lu_%d.%s",
-            GetTickCount(), counter++, extension.c_str());
+        static std::atomic<int> counter{0};
+        wchar_t name[96];
+        swprintf_s(name, 96, L"\\%ls%lu_%d.%ls",
+            prefix.c_str(), GetTickCount(), counter++, extension.c_str());
         return dir + name;
     }
 
     // Run d2.exe with input/output paths. Returns exit code.
-    static int runD2(const std::wstring& d2Exe,
+    int ERDiagramService::RunD2(const std::wstring& d2Exe,
         const std::wstring& inputPath, const std::wstring& outputPath,
         std::wstring& stderrOut)
     {
@@ -280,12 +307,12 @@ namespace DBModels
             try { cols = adapter->describeTable(tableName, schema); }
             catch (...) { continue; }
 
-            ss << sanitizeIdentifier(tableName) << L": {\n";
+            ss << SanitizeIdentifier(tableName) << L": {\n";
             ss << L"  shape: sql_table\n";
             for (const auto& col : cols)
             {
-                std::wstring colId = sanitizeIdentifier(col.name);
-                std::wstring colKey = quoteIfReserved(colId);
+                std::wstring colId = SanitizeIdentifier(col.name);
+                std::wstring colKey = QuoteIfReserved(colId);
                 std::wstring typeId = simplifyType(col.dataType);
                 ss << L"  " << colKey << L": " << typeId;
                 if (col.isPrimaryKey)
@@ -314,11 +341,11 @@ namespace DBModels
 
                 // FK arrow without label — user prefers clean lines.
                 // Quote column identifiers if they collide with d2 keywords.
-                ss << sanitizeIdentifier(tableName) << L"."
-                   << quoteIfReserved(sanitizeIdentifier(fk.column))
+                ss << SanitizeIdentifier(tableName) << L"."
+                   << QuoteIfReserved(SanitizeIdentifier(fk.column))
                    << L" -> "
-                   << sanitizeIdentifier(fk.referencedTable) << L"."
-                   << quoteIfReserved(sanitizeIdentifier(fk.referencedColumn))
+                   << SanitizeIdentifier(fk.referencedTable) << L"."
+                   << QuoteIfReserved(SanitizeIdentifier(fk.referencedColumn))
                    << L"\n";
                 relCount++;
             }
@@ -381,8 +408,8 @@ namespace DBModels
         report(L"Using d2.exe at: " + d2Exe);
 
         // 3. Write D2 text to temp file (UTF-8)
-        std::wstring inputPath = tempPath(L"d2");
-        std::wstring outputPath = tempPath(L"svg");
+        std::wstring inputPath = TempPath(L"d2");
+        std::wstring outputPath = TempPath(L"svg");
         if (inputPath.empty() || outputPath.empty())
         {
             result.error = L"Cannot create temp files";
@@ -403,7 +430,7 @@ namespace DBModels
         // 4. Run d2.exe
         report(L"Running d2.exe...");
         std::wstring stderrOut;
-        int exitCode = runD2(d2Exe, inputPath, outputPath, stderrOut);
+        int exitCode = RunD2(d2Exe, inputPath, outputPath, stderrOut);
 
         if (exitCode != 0)
         {

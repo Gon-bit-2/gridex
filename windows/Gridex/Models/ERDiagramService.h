@@ -36,5 +36,38 @@ namespace DBModels
 
         // Resolve d2.exe path (Package.Current install dir or exe dir)
         static std::wstring LocateD2Exe();
+
+        // ── Public D2 helpers ──────────────────────────────
+        // Shared escape/quote helpers for any caller emitting D2 source.
+        // Previously file-scope statics; promoted to public static so other
+        // services (e.g. enterprise row-relationship graph) reuse the same
+        // rules without copy-paste drift.
+
+        // Replace non-[A-Za-z0-9_] with '_'; prefix "t_" if starts with digit.
+        static std::wstring SanitizeIdentifier(const std::wstring& name);
+
+        // True if name collides with a d2 reserved keyword (shape, width, …).
+        static bool IsD2Reserved(const std::wstring& name);
+
+        // Wrap in double quotes if reserved, else return unchanged.
+        static std::wstring QuoteIfReserved(const std::wstring& name);
+
+        // Wrap text in double quotes and escape ", \, and newlines so it
+        // can be used as a D2 string label.
+        static std::wstring EscapeD2Label(const std::wstring& text);
+
+        // Build %TEMP%\gridex\<prefix><tick>_<counter>.<extension>.
+        // Default prefix "er_" preserves existing behavior; callers that
+        // need a disjoint filename namespace pass their own prefix.
+        static std::wstring TempPath(const std::wstring& extension,
+                                     const std::wstring& prefix = L"er_");
+
+        // Invoke bundled d2.exe with standard layout/theme/bundle flags.
+        // Writes SVG to outputPath; captures stderr into stderrOut.
+        // Returns process exit code (-1 on launch failure).
+        static int RunD2(const std::wstring& d2ExePath,
+                         const std::wstring& inputPath,
+                         const std::wstring& outputPath,
+                         std::wstring& stderrOut);
     };
 }
