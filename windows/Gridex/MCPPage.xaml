@@ -306,14 +306,19 @@
             </PivotItem>
 
             <PivotItem Header="Activity">
+                <!-- Outer grid: filter bar + detail split + footer.
+                     The split row (*) contains a 2-column grid — the
+                     audit table on the left and the selected-entry
+                     detail pane on the right, same layout mac's
+                     HSplitView uses. -->
                 <Grid RowSpacing="0">
                     <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
+                    <!-- Filter bar -->
                     <Grid Grid.Row="0" Padding="4,6,4,10" ColumnSpacing="10">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" MaxWidth="280" />
@@ -340,49 +345,83 @@
                         </Button>
                     </Grid>
 
-                    <Border Grid.Row="1" Padding="12,8"
-                            Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}"
-                            CornerRadius="6,6,0,0"
-                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                            BorderThickness="1,1,1,0">
-                        <Grid ColumnSpacing="12">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="90" />
-                                <ColumnDefinition Width="*" MinWidth="160" />
-                                <ColumnDefinition Width="120" />
-                                <ColumnDefinition Width="80" />
-                                <ColumnDefinition Width="70" />
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" Text="Time" FontSize="12" FontWeight="SemiBold" />
-                            <TextBlock Grid.Column="1" Text="Tool" FontSize="12" FontWeight="SemiBold" />
-                            <TextBlock Grid.Column="2" Text="Client" FontSize="12" FontWeight="SemiBold" />
-                            <TextBlock Grid.Column="3" Text="Status" FontSize="12" FontWeight="SemiBold" />
-                            <TextBlock Grid.Column="4" Text="Duration" FontSize="12" FontWeight="SemiBold" />
+                    <!-- Table + detail split -->
+                    <Grid Grid.Row="1" ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" MinWidth="440" />
+                            <ColumnDefinition Width="360" />
+                        </Grid.ColumnDefinitions>
+
+                        <!-- Left: audit table -->
+                        <Grid Grid.Column="0" RowSpacing="0">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+
+                            <Border Grid.Row="0" Padding="12,8"
+                                    Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}"
+                                    CornerRadius="6,6,0,0"
+                                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                    BorderThickness="1,1,1,0">
+                                <Grid ColumnSpacing="12">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="90" />
+                                        <ColumnDefinition Width="*" MinWidth="160" />
+                                        <ColumnDefinition Width="120" />
+                                        <ColumnDefinition Width="80" />
+                                        <ColumnDefinition Width="70" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="Time"     FontSize="12" FontWeight="SemiBold" />
+                                    <TextBlock Grid.Column="1" Text="Tool"     FontSize="12" FontWeight="SemiBold" />
+                                    <TextBlock Grid.Column="2" Text="Client"   FontSize="12" FontWeight="SemiBold" />
+                                    <TextBlock Grid.Column="3" Text="Status"   FontSize="12" FontWeight="SemiBold" />
+                                    <TextBlock Grid.Column="4" Text="Duration" FontSize="12" FontWeight="SemiBold" />
+                                </Grid>
+                            </Border>
+
+                            <ScrollViewer Grid.Row="1"
+                                          BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                          BorderThickness="1,0,1,1"
+                                          CornerRadius="0,0,6,6">
+                                <StackPanel x:Name="ActRowsPanel" Spacing="0" />
+                            </ScrollViewer>
+
+                            <StackPanel x:Name="ActEmptyState" Grid.Row="1"
+                                        VerticalAlignment="Center" HorizontalAlignment="Center"
+                                        Spacing="8"
+                                        Visibility="Collapsed">
+                                <FontIcon Glyph="&#xE9D9;" FontSize="36"
+                                          Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                                <TextBlock Text="No activity yet"
+                                           HorizontalAlignment="Center" FontSize="14" />
+                                <TextBlock Text="MCP tool invocations will appear here once a client connects."
+                                           HorizontalAlignment="Center" FontSize="12"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                           TextWrapping="Wrap" MaxWidth="380" TextAlignment="Center" />
+                            </StackPanel>
                         </Grid>
-                    </Border>
 
-                    <ScrollViewer Grid.Row="2"
-                                  BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                                  BorderThickness="1,0,1,1"
-                                  CornerRadius="0,0,6,6">
-                        <StackPanel x:Name="ActRowsPanel" Spacing="0" />
-                    </ScrollViewer>
+                        <!-- Right: detail pane (populated on row click) -->
+                        <Border Grid.Column="1"
+                                Padding="16"
+                                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                                CornerRadius="6"
+                                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                BorderThickness="1">
+                            <ScrollViewer>
+                                <StackPanel x:Name="ActDetailPanel" Spacing="12">
+                                    <TextBlock x:Name="ActDetailPlaceholder"
+                                               Text="Click a row on the left to see the full audit entry (SQL preview, client info, error message, etc.)."
+                                               FontSize="12"
+                                               TextWrapping="Wrap"
+                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                </StackPanel>
+                            </ScrollViewer>
+                        </Border>
+                    </Grid>
 
-                    <StackPanel x:Name="ActEmptyState" Grid.Row="2"
-                                VerticalAlignment="Center" HorizontalAlignment="Center"
-                                Spacing="8"
-                                Visibility="Collapsed">
-                        <FontIcon Glyph="&#xE9D9;" FontSize="36"
-                                  Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
-                        <TextBlock Text="No activity yet"
-                                   HorizontalAlignment="Center" FontSize="14" />
-                        <TextBlock Text="MCP tool invocations will appear here once a client connects."
-                                   HorizontalAlignment="Center" FontSize="12"
-                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                   TextWrapping="Wrap" MaxWidth="380" TextAlignment="Center" />
-                    </StackPanel>
-
-                    <TextBlock Grid.Row="3" x:Name="ActPathText"
+                    <TextBlock Grid.Row="2" x:Name="ActPathText"
                                FontSize="11"
                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                                IsTextSelectionEnabled="True"

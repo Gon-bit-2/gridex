@@ -1,6 +1,8 @@
 #pragma once
 
 #include "MCPPage.g.h"
+#include "Models/MCP/MCPAuditEntry.h"
+#include <vector>
 
 namespace winrt::Gridex::implementation
 {
@@ -65,6 +67,11 @@ namespace winrt::Gridex::implementation
         void ApplyStartStopButton(bool running);
         void RefreshConnectionsTab();
         void RefreshActivityTab();
+        void SelectActivityEntry(int index);
+
+        // Cache tailed audit entries so a click on a row can look
+        // up the full record by index. Populated by RefreshActivityTab.
+        std::vector<DBModels::MCPAuditEntry> cachedActivity_;
     };
 }
 

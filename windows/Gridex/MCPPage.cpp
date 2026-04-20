@@ -14,6 +14,7 @@
 #include <winrt/Windows.ApplicationModel.DataTransfer.h>
 #include <winrt/Windows.UI.h>
 #include <winrt/Microsoft.UI.Xaml.Shapes.h>
+#include <winrt/Windows.UI.Text.h>
 #include <nlohmann/json.hpp>
 #include <fstream>
 #include <shlobj.h>
@@ -634,6 +635,13 @@ namespace winrt::Gridex::implementation
         const std::wstring q = std::wstring(ActSearchBox().Text());
         const int statusIdx = ActStatusCombo().SelectedIndex();
 
+        // Build the filtered list first and cache it so click
+        // handlers can look up the full record by index. We need
+        // stable indices — rebuilding the cache on every refresh
+        // is fine because the table is also rebuilt each time.
+        cachedActivity_.clear();
+        cachedActivity_.reserve(entries.size());
+
         int shown = 0;
         for (const auto& e : entries)
         {
@@ -657,6 +665,9 @@ namespace winrt::Gridex::implementation
                     lower(clientW).find(qL) == std::wstring::npos &&
                     lower(sqlW).find(qL) == std::wstring::npos) continue;
             }
+
+            const int cacheIdx = static_cast<int>(cachedActivity_.size());
+            cachedActivity_.push_back(e);
 
             Grid row;
             row.Padding(Thickness{ 12, 6, 12, 6 });
@@ -701,12 +712,158 @@ namespace winrt::Gridex::implementation
             Border wrap; wrap.Child(row);
             wrap.BorderBrush(SolidColorBrush(ColorHelper::FromArgb(30, 128, 128, 128)));
             wrap.BorderThickness(Thickness{ 0, 0, 0, 1 });
+            wrap.Background(SolidColorBrush(ColorHelper::FromArgb(0, 0, 0, 0)));
+            // Row click → populate detail pane. Uses Tapped rather
+            // than PointerPressed so touch + mouse both fire one
+            // event with click semantics.
+            wrap.Tapped([this, cacheIdx](auto&&, auto&&) {
+                SelectActivityEntry(cacheIdx);
+            });
             panel.Children().Append(wrap);
             ++shown;
         }
 
         ActEmptyState().Visibility(shown == 0
             ? mux::Visibility::Visible : mux::Visibility::Collapsed);
+
+        // Auto-select the first entry so the detail pane isn't empty
+        // on load. Skipped when nothing passed the filter.
+        if (!cachedActivity_.empty()) SelectActivityEntry(0);
+    }
+
+    // Populate the right-side detail panel for a given cached entry.
+    // Mirrors the Form sections in macOS MCPActivityView.detailPanel:
+    // Event, Client, Connection, Result, SQL, Error.
+    void MCPPage::SelectActivityEntry(int index)
+    {
+        using namespace winrt::Microsoft::UI::Xaml;
+        using namespace winrt::Microsoft::UI::Xaml::Controls;
+        using namespace winrt::Microsoft::UI::Xaml::Media;
+        using namespace winrt::Windows::UI;
+
+        auto panel = ActDetailPanel();
+        if (!panel) return;
+        if (index < 0 || index >= static_cast<int>(cachedActivity_.size())) return;
+        const auto& e = cachedActivity_[index];
+
+        panel.Children().Clear();
+
+        auto addHeader = [&](winrt::hstring text) {
+            TextBlock h;
+            h.Text(text);
+            h.FontSize(13);
+            h.FontWeight(Windows::UI::Text::FontWeights::SemiBold());
+            h.Margin(Thickness{ 0, 8, 0, 2 });
+            panel.Children().Append(h);
+        };
+
+        auto addRow = [&](const wchar_t* label, winrt::hstring value, bool mono = false) {
+            Grid g; g.ColumnSpacing(8);
+            ColumnDefinition l; l.Width(GridLengthHelper::FromPixels(100));
+            ColumnDefinition v; v.Width(GridLengthHelper::FromValueAndType(1, GridUnitType::Star));
+            g.ColumnDefinitions().Append(l);
+            g.ColumnDefinitions().Append(v);
+
+            TextBlock lb; lb.Text(label); lb.FontSize(11);
+            lb.Foreground(SolidColorBrush(ColorHelper::FromArgb(255, 150, 150, 150)));
+            Grid::SetColumn(lb, 0); g.Children().Append(lb);
+
+            TextBlock vb; vb.Text(value); vb.FontSize(12);
+            vb.TextWrapping(TextWrapping::Wrap);
+            vb.IsTextSelectionEnabled(true);
+            if (mono) vb.FontFamily(winrt::Microsoft::UI::Xaml::Media::FontFamily(L"Consolas"));
+            Grid::SetColumn(vb, 1); g.Children().Append(vb);
+
+            panel.Children().Append(g);
+        };
+
+        auto addBlock = [&](const wchar_t* label, winrt::hstring value, bool mono = true) {
+            TextBlock lb; lb.Text(label); lb.FontSize(11);
+            lb.Foreground(SolidColorBrush(ColorHelper::FromArgb(255, 150, 150, 150)));
+            lb.Margin(Thickness{ 0, 4, 0, 2 });
+            panel.Children().Append(lb);
+
+            Border b;
+            b.Padding(Thickness{ 8, 6, 8, 6 });
+            b.CornerRadius(winrt::Microsoft::UI::Xaml::CornerRadius{ 4, 4, 4, 4 });
+            b.Background(SolidColorBrush(ColorHelper::FromArgb(255, 28, 28, 30)));
+            TextBlock vb; vb.Text(value); vb.FontSize(12);
+            vb.TextWrapping(TextWrapping::Wrap);
+            vb.IsTextSelectionEnabled(true);
+            if (mono) vb.FontFamily(winrt::Microsoft::UI::Xaml::Media::FontFamily(L"Consolas"));
+            b.Child(vb);
+            panel.Children().Append(b);
+        };
+
+        // Format full timestamp.
+        auto fullTime = [](std::chrono::system_clock::time_point tp) {
+            const std::time_t t = std::chrono::system_clock::to_time_t(tp);
+            std::tm tm{};
+            localtime_s(&tm, &t);
+            wchar_t buf[32];
+            wcsftime(buf, 32, L"%Y-%m-%d %H:%M:%S", &tm);
+            return std::wstring(buf);
+        };
+
+        addHeader(L"Event");
+        addRow(L"Tool", winrt::hstring(DBModels::MCPToolHelpers::fromUtf8(e.tool)), true);
+        addRow(L"Tier", winrt::hstring(L"Tier " + std::to_wstring(e.tier)));
+        addRow(L"Time", winrt::hstring(fullTime(e.timestamp)));
+        if (!e.eventId.empty())
+        {
+            std::string shortId = e.eventId.size() > 8 ? e.eventId.substr(0, 8) + "..." : e.eventId;
+            addRow(L"Event ID", winrt::hstring(DBModels::MCPToolHelpers::fromUtf8(shortId)), true);
+        }
+
+        addHeader(L"Client");
+        addRow(L"Name", winrt::hstring(DBModels::MCPToolHelpers::fromUtf8(e.client.name)));
+        addRow(L"Version", winrt::hstring(DBModels::MCPToolHelpers::fromUtf8(e.client.version)));
+        addRow(L"Transport", winrt::hstring(DBModels::MCPToolHelpers::fromUtf8(e.client.transport)));
+
+        if (e.connectionId.has_value() || e.connectionType.has_value())
+        {
+            addHeader(L"Connection");
+            if (e.connectionType.has_value())
+                addRow(L"Database", winrt::hstring(DBModels::MCPToolHelpers::fromUtf8(*e.connectionType)));
+            if (e.connectionId.has_value())
+            {
+                const auto& cid = *e.connectionId;
+                std::string shortId = cid.size() > 8 ? cid.substr(0, 8) + "..." : cid;
+                addRow(L"ID", winrt::hstring(DBModels::MCPToolHelpers::fromUtf8(shortId)), true);
+            }
+        }
+
+        addHeader(L"Result");
+        addRow(L"Status", winrt::hstring(statusLabel(e.result.status)));
+        addRow(L"Duration", winrt::hstring(std::to_wstring(e.result.durationMs) + L" ms"));
+        if (e.result.rowsReturned.has_value())
+            addRow(L"Rows returned", winrt::hstring(std::to_wstring(*e.result.rowsReturned)));
+        if (e.result.rowsAffected.has_value())
+            addRow(L"Rows affected", winrt::hstring(std::to_wstring(*e.result.rowsAffected)));
+
+        if (e.input.sqlPreview.has_value() && !e.input.sqlPreview->empty())
+        {
+            addBlock(L"SQL", winrt::hstring(DBModels::MCPToolHelpers::fromUtf8(*e.input.sqlPreview)));
+        }
+
+        if (e.error.has_value() && !e.error->empty())
+        {
+            TextBlock lb; lb.Text(L"Error"); lb.FontSize(11);
+            lb.Foreground(SolidColorBrush(ColorHelper::FromArgb(255, 220, 53, 69)));
+            lb.Margin(Thickness{ 0, 8, 0, 2 });
+            panel.Children().Append(lb);
+
+            Border b;
+            b.Padding(Thickness{ 8, 6, 8, 6 });
+            b.CornerRadius(winrt::Microsoft::UI::Xaml::CornerRadius{ 4, 4, 4, 4 });
+            b.Background(SolidColorBrush(ColorHelper::FromArgb(255, 40, 20, 22)));
+            TextBlock vb; vb.Text(winrt::hstring(DBModels::MCPToolHelpers::fromUtf8(*e.error)));
+            vb.FontSize(12); vb.TextWrapping(TextWrapping::Wrap);
+            vb.IsTextSelectionEnabled(true);
+            vb.Foreground(SolidColorBrush(ColorHelper::FromArgb(255, 255, 180, 180)));
+            b.Child(vb);
+            panel.Children().Append(b);
+        }
     }
 
     void MCPPage::ActFilter_Changed(
