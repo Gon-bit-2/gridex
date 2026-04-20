@@ -331,8 +331,50 @@ namespace winrt::Gridex::implementation
         winrt::Windows::Foundation::IInspectable const&,
         winrt::Microsoft::UI::Xaml::RoutedEventArgs const&)
     {
-        HttpPortRow().Visibility(HttpToggle().IsOn()
+        const bool on = HttpToggle().IsOn();
+        HttpPortRow().Visibility(on
             ? mux::Visibility::Visible : mux::Visibility::Collapsed);
+
+        // Persist immediately — toggle sits on the Overview tab,
+        // where there is no Save button. Previously the flag only
+        // lived in the control state and got lost on navigation.
+        auto s = DBModels::AppSettings::Load();
+        if (s.mcpHttpEnabled != on)
+        {
+            s.mcpHttpEnabled = on;
+            s.Save();
+        }
+
+        // Hint to restart the server if the flag changed while
+        // something is already running — the HTTP listener won't
+        // hot-swap otherwise.
+        if (auto srv = DBModels::MCPServerHost::instance();
+            srv && srv->isRunning())
+        {
+            if (auto sub = RunningSubtitle())
+                sub.Text(L"Restart the server to apply the HTTP toggle.");
+        }
+    }
+
+    void MCPPage::HttpPortBox_ValueChanged(
+        winrt::Microsoft::UI::Xaml::Controls::NumberBox const& sender,
+        winrt::Microsoft::UI::Xaml::Controls::NumberBoxValueChangedEventArgs const&)
+    {
+        const double v = sender.Value();
+        if (std::isnan(v) || v < 1024 || v > 65535) return;
+        const int port = static_cast<int>(v);
+        auto s = DBModels::AppSettings::Load();
+        if (s.mcpHttpPort != port)
+        {
+            s.mcpHttpPort = port;
+            s.Save();
+            if (auto srv = DBModels::MCPServerHost::instance();
+                srv && srv->isRunning())
+            {
+                if (auto sub = RunningSubtitle())
+                    sub.Text(L"Restart the server to apply the new HTTP port.");
+            }
+        }
     }
 
     void MCPPage::CopyConfig_Click(

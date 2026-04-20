@@ -79,13 +79,12 @@ namespace DBModels
             stdio_.setRequestHandler([this](const JSONRPCRequest& r){ handleRequest(r); });
             stdio_.start();
         }
-        else
+        else if (settings_.mcpHttpEnabled)
         {
-            // HttpOnly: always start HTTP on localhost. If the user
-            // flipped `mcpHttpEnabled` in settings the port comes
-            // from there; otherwise fall back to the default 3333.
-            // Remote binding (`0.0.0.0`) only when `allowRemoteHTTP`.
-            const int port = settings_.mcpHttpEnabled
+            // HttpOnly mode + toggle is on → bind the HTTP listener.
+            // Defaults: 127.0.0.1:<mcpHttpPort>. Remote binding
+            // (0.0.0.0) only when allowRemoteHTTP is also on.
+            const int port = settings_.mcpHttpPort > 0
                 ? settings_.mcpHttpPort : 3333;
             const std::string host = settings_.mcpAllowRemoteHTTP
                 ? "0.0.0.0" : "127.0.0.1";
@@ -94,19 +93,25 @@ namespace DBModels
                 [this](const JSONRPCRequest& r) -> JSONRPCResponse {
                     // HTTP is synchronous — we build the response
                     // inline instead of routing through sendResponse.
-                    // Reuse the same dispatch branches handleRequest
-                    // uses by returning its output directly.
                     if (r.method == "initialize")      return handleInitialize(r);
                     if (r.method == "tools/list")      return handleToolsList(r);
                     if (r.method == "tools/call")      return handleToolsCall(r);
+                    if (r.method == "prompts/list")    return JSONRPCResponse::ok(r.id, nlohmann::json{{"prompts", nlohmann::json::array()}});
+                    if (r.method == "resources/list")  return JSONRPCResponse::ok(r.id, nlohmann::json{{"resources", nlohmann::json::array()}});
+                    if (r.method == "resources/templates/list") return JSONRPCResponse::ok(r.id, nlohmann::json{{"resourceTemplates", nlohmann::json::array()}});
                     if (r.method == "ping")
                         return JSONRPCResponse::ok(r.id, nlohmann::json{{"pong", true}});
                     if (r.method == "shutdown")       { stop(); return JSONRPCResponse::ok(r.id, nullptr); }
-                    if (r.method == "initialized")     return JSONRPCResponse::ok(r.id, nullptr);
+                    if (r.method == "initialized" || r.method == "notifications/initialized")
+                        return JSONRPCResponse::ok(r.id, nullptr);
                     return JSONRPCResponse::fail(r.id, JSONRPCError::methodNotFound());
                 });
             http_.start(host, port);
         }
+        // else: HttpOnly mode but HTTP toggle is off — server runs
+        // "warm" (tools registered, audit log primed) without
+        // binding any socket. Flip the toggle on + Start again to
+        // actually listen.
     }
 
     void MCPServer::stop()

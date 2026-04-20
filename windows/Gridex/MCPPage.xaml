@@ -207,7 +207,8 @@
                                         <NumberBox x:Name="HttpPortBox"
                                                    Grid.Column="1"
                                                    Minimum="1024" Maximum="65535"
-                                                   Value="3333" Width="120" />
+                                                   Value="3333" Width="120"
+                                                   ValueChanged="HttpPortBox_ValueChanged" />
                                     </Grid>
                                 </StackPanel>
                             </Border>

@@ -25,6 +25,12 @@ namespace winrt::Gridex::implementation
             winrt::Windows::Foundation::IInspectable const& sender,
             winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e);
 
+        // Port persists on edit (auto-save) so the Overview tab
+        // doesn't need a dedicated Save button for this field.
+        void HttpPortBox_ValueChanged(
+            winrt::Microsoft::UI::Xaml::Controls::NumberBox const& sender,
+            winrt::Microsoft::UI::Xaml::Controls::NumberBoxValueChangedEventArgs const& args);
+
         void CopyConfig_Click(
             winrt::Windows::Foundation::IInspectable const& sender,
             winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e);
