@@ -54,11 +54,19 @@
 
         <!-- Pivot = 5 tabs matching mac. Each tab body is its own
              panel — Overview is wired fully, the rest show a
-             placeholder until the implementation catches up. -->
-        <Pivot Grid.Row="1" x:Name="Tabs" Margin="16,0,16,16">
+             placeholder until the implementation catches up.
+             HorizontalAlignment=Center + MaxWidth keeps the
+             tab-strip centered on ultra-wide displays instead of
+             letting the 5 short tab labels cluster on the left. -->
+        <Pivot Grid.Row="1" x:Name="Tabs" Margin="0,0,0,16"
+               HorizontalAlignment="Stretch"
+               HorizontalContentAlignment="Center">
             <PivotItem Header="Overview">
                 <ScrollViewer>
-                    <StackPanel Spacing="20" MaxWidth="820" HorizontalAlignment="Stretch">
+                    <!-- HorizontalAlignment=Center so the content
+                         sits in the middle of the screen like the
+                         mac reference instead of stretching right. -->
+                    <StackPanel Spacing="20" MaxWidth="820" HorizontalAlignment="Center">
 
                         <!-- Running card -->
                         <Border Padding="16"
@@ -213,7 +221,7 @@
 
             <PivotItem Header="Setup">
                 <ScrollViewer>
-                    <StackPanel Spacing="16" MaxWidth="820">
+                    <StackPanel Spacing="16" MaxWidth="820" HorizontalAlignment="Center">
                         <!-- Info banner — matches mac "This is a config file..." -->
                         <Border Padding="12,10" CornerRadius="6"
                                 Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}">
@@ -296,7 +304,7 @@
 
             <PivotItem Header="Config">
                 <ScrollViewer>
-                    <StackPanel Spacing="16" MaxWidth="820">
+                    <StackPanel Spacing="16" MaxWidth="820" HorizontalAlignment="Center">
                         <TextBlock Text="Rate Limits" FontSize="14" FontWeight="SemiBold" />
                         <Grid ColumnSpacing="16" RowSpacing="8">
                             <Grid.ColumnDefinitions>
