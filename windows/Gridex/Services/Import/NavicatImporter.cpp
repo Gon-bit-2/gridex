@@ -15,6 +15,7 @@
 #include <sstream>
 #include <string>
 #include <algorithm>
+#include <array>
 
 namespace DBModels { namespace NavicatImporter {
 
@@ -140,7 +141,164 @@ namespace {
     }
 }
 
-bool isInstalled() { return true; }
+// ── Registry scan (Windows Navicat) ────────────────────────
+// Navicat Windows persists each connection as a registry subkey
+// under HKCU\Software\PremiumSoft\Navicat<PRODUCT>\Servers\<name>.
+// We walk the known product hives and emit one ImportedConnection
+// per subkey. String values use the `W` / wide variant because
+// Navicat stores non-ASCII names (e.g. host labels in Chinese)
+// verbatim.
+
+namespace {
+    struct NavicatHive {
+        const wchar_t* subKey;        // under HKCU
+        DatabaseType   dbType;
+    };
+
+    const std::array<NavicatHive, 7>& hives()
+    {
+        static const std::array<NavicatHive, 7> v{{
+            { L"Software\\PremiumSoft\\NavicatPG\\Servers",       DatabaseType::PostgreSQL },
+            { L"Software\\PremiumSoft\\NavicatMARIADB\\Servers",  DatabaseType::MySQL },
+            { L"Software\\PremiumSoft\\NavicatMSSQL\\Servers",    DatabaseType::MSSQLServer },
+            { L"Software\\PremiumSoft\\NavicatMONGODB\\Servers",  DatabaseType::MongoDB },
+            { L"Software\\PremiumSoft\\NavicatREDIS\\Servers",    DatabaseType::Redis },
+            { L"Software\\PremiumSoft\\NavicatSQLite\\Servers",   DatabaseType::SQLite },
+            { L"Software\\PremiumSoft\\NavicatPremium\\Servers",  DatabaseType::PostgreSQL }
+        }};
+        return v;
+    }
+
+    // Helpers around RegQueryValueExW to unwrap REG_SZ / REG_DWORD.
+    std::wstring regReadString(HKEY h, const wchar_t* name)
+    {
+        DWORD type = 0, cb = 0;
+        if (RegQueryValueExW(h, name, nullptr, &type, nullptr, &cb) != ERROR_SUCCESS
+            || type != REG_SZ || cb == 0) return {};
+        std::wstring out(cb / sizeof(wchar_t), L'\0');
+        if (RegQueryValueExW(h, name, nullptr, nullptr,
+            reinterpret_cast<LPBYTE>(&out[0]), &cb) != ERROR_SUCCESS) return {};
+        while (!out.empty() && out.back() == L'\0') out.pop_back();
+        return out;
+    }
+
+    bool regReadDword(HKEY h, const wchar_t* name, DWORD& out)
+    {
+        DWORD type = 0, cb = sizeof(DWORD);
+        return RegQueryValueExW(h, name, nullptr, &type,
+            reinterpret_cast<LPBYTE>(&out), &cb) == ERROR_SUCCESS
+            && type == REG_DWORD;
+    }
+
+    ImportedConnection readServer(HKEY parent, const std::wstring& name, DatabaseType fallbackType)
+    {
+        ImportedConnection c;
+        c.source = ImportSource::Navicat;
+        c.name = name;
+        c.databaseType = fallbackType;
+
+        HKEY sub = nullptr;
+        if (RegOpenKeyExW(parent, name.c_str(), 0, KEY_READ, &sub) != ERROR_SUCCESS)
+            return c;
+
+        // NavicatPremium\Servers mixes products — prefer the
+        // connection's self-reported type when present.
+        const auto conn = regReadString(sub, L"ConnectionType");
+        if (!conn.empty())
+        {
+            std::wstring lower; lower.reserve(conn.size());
+            for (wchar_t ch : conn) lower.push_back((wchar_t)towlower(ch));
+            if      (lower.find(L"postgres") != std::wstring::npos) c.databaseType = DatabaseType::PostgreSQL;
+            else if (lower.find(L"mysql")    != std::wstring::npos) c.databaseType = DatabaseType::MySQL;
+            else if (lower.find(L"maria")    != std::wstring::npos) c.databaseType = DatabaseType::MySQL;
+            else if (lower.find(L"mssql")    != std::wstring::npos) c.databaseType = DatabaseType::MSSQLServer;
+            else if (lower.find(L"mongo")    != std::wstring::npos) c.databaseType = DatabaseType::MongoDB;
+            else if (lower.find(L"redis")    != std::wstring::npos) c.databaseType = DatabaseType::Redis;
+            else if (lower.find(L"sqlite")   != std::wstring::npos) c.databaseType = DatabaseType::SQLite;
+        }
+
+        c.host = regReadString(sub, L"Host");
+        DWORD port = 0;
+        if (regReadDword(sub, L"Port", port) && port != 0)
+            c.port = static_cast<uint16_t>(port);
+
+        c.username = regReadString(sub, L"UserName");
+        c.database = regReadString(sub, L"InitialDatabase");
+        c.filePath = regReadString(sub, L"DatabaseFile");
+
+        DWORD ssl = 0;
+        if (regReadDword(sub, L"UseSSL", ssl) && ssl != 0) c.sslEnabled = true;
+
+        // SSH tunnel — same keys as the .ncx schema.
+        c.sshHost = regReadString(sub, L"SSH_Host");
+        if (c.sshHost.empty()) c.sshHost = regReadString(sub, L"SSH_Server");
+        c.sshUser = regReadString(sub, L"SSH_UserName");
+        DWORD sshPort = 0;
+        if (regReadDword(sub, L"SSH_Port", sshPort) && sshPort != 0)
+            c.sshPort = static_cast<uint16_t>(sshPort);
+
+        // Password is Blowfish-encrypted in Pwd_2 — skipped on
+        // Windows (see header).
+        RegCloseKey(sub);
+        return c;
+    }
+
+    std::vector<ImportedConnection> scanHive(const NavicatHive& h)
+    {
+        std::vector<ImportedConnection> out;
+        HKEY root = nullptr;
+        if (RegOpenKeyExW(HKEY_CURRENT_USER, h.subKey, 0, KEY_READ, &root) != ERROR_SUCCESS)
+            return out;
+
+        wchar_t name[512];
+        DWORD nameLen = 0;
+        DWORD idx = 0;
+        while (true)
+        {
+            nameLen = 512;
+            const LONG rc = RegEnumKeyExW(root, idx, name, &nameLen,
+                                           nullptr, nullptr, nullptr, nullptr);
+            if (rc == ERROR_NO_MORE_ITEMS) break;
+            if (rc != ERROR_SUCCESS) break;
+            out.push_back(readServer(root, std::wstring(name, nameLen), h.dbType));
+            ++idx;
+        }
+        RegCloseKey(root);
+        return out;
+    }
+}
+
+bool isInstalled()
+{
+    HKEY h = nullptr;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\PremiumSoft",
+                      0, KEY_READ, &h) == ERROR_SUCCESS)
+    {
+        RegCloseKey(h);
+        return true;
+    }
+    return false;
+}
+
+std::vector<ImportedConnection> importConnections()
+{
+    // Dedupe NavicatPremium overlap — if a server name already
+    // shown from a specialized hive, skip the duplicate we'd pull
+    // from Premium's mixed hive.
+    std::vector<ImportedConnection> out;
+    for (const auto& h : hives())
+    {
+        auto rows = scanHive(h);
+        for (auto& r : rows)
+        {
+            bool dup = false;
+            for (const auto& existing : out)
+                if (existing.name == r.name && existing.host == r.host) { dup = true; break; }
+            if (!dup) out.push_back(std::move(r));
+        }
+    }
+    return out;
+}
 
 std::vector<ImportedConnection> importFromNCX(const std::wstring& ncxPath)
 {

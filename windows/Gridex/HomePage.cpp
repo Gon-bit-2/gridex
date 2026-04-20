@@ -670,10 +670,11 @@ namespace winrt::Gridex::implementation
                 installed ? label : std::wstring(label) + L"  (not detected)")));
             sourceCombo.Items().Append(item);
         };
-        addSource(L"DBeaver",      DBModels::DBeaverImporter::isInstalled());
-        addSource(L"DataGrip",     DBModels::DataGripImporter::isInstalled());
-        addSource(L"Navicat (pick .ncx)", true);
-        addSource(L"TablePlus",    DBModels::TablePlusImporter::isInstalled());
+        addSource(L"DBeaver",             DBModels::DBeaverImporter::isInstalled());
+        addSource(L"DataGrip",            DBModels::DataGripImporter::isInstalled());
+        addSource(L"Navicat",             DBModels::NavicatImporter::isInstalled());
+        addSource(L"Navicat (.ncx file)", true);
+        addSource(L"TablePlus",           DBModels::TablePlusImporter::isInstalled());
         sourceCombo.SelectedIndex(0);
         content.Children().Append(sourceCombo);
 
@@ -706,11 +707,14 @@ namespace winrt::Gridex::implementation
 
             try
             {
-                if (idx == 0) *imported = DBModels::DBeaverImporter::importConnections();
+                // Indices must match the addSource() call order:
+                //   0 DBeaver, 1 DataGrip, 2 Navicat (registry),
+                //   3 Navicat (.ncx file), 4 TablePlus.
+                if      (idx == 0) *imported = DBModels::DBeaverImporter::importConnections();
                 else if (idx == 1) *imported = DBModels::DataGripImporter::importConnections();
-                else if (idx == 2)
+                else if (idx == 2) *imported = DBModels::NavicatImporter::importConnections();
+                else if (idx == 3)
                 {
-                    // Open file picker for .ncx file.
                     using namespace winrt::Microsoft::Windows::Storage::Pickers;
                     winrt::Microsoft::UI::WindowId windowId{
                         reinterpret_cast<uint64_t>(
@@ -722,14 +726,9 @@ namespace winrt::Gridex::implementation
                     if (result.Path().empty()) { status.Text(L"Cancelled."); co_return; }
                     *imported = DBModels::NavicatImporter::importFromNCX(std::wstring(result.Path()));
                 }
-                else if (idx == 3)
+                else if (idx == 4)
                 {
                     *imported = DBModels::TablePlusImporter::importConnections();
-                    if (imported->empty())
-                    {
-                        status.Text(winrt::hstring(DBModels::TablePlusImporter::windowsSupportNote()));
-                        co_return;
-                    }
                 }
             }
             catch (const std::exception& e)
