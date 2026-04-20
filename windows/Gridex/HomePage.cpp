@@ -184,6 +184,11 @@ namespace winrt::Gridex::implementation
 
     void HomePage::RefreshList(const std::wstring& searchQuery)
     {
+        // Always re-read from the store so imports / edits / deletes
+        // don't need a page-reload to show. Cheap: ConnectionStore::Load
+        // reads one SQLite table and decrypts passwords — sub-ms for
+        // typical <200 connection counts.
+        allConnections_ = DBModels::ConnectionStore::Load();
         ConnectionsListView().Items().Clear();
 
         auto matches = [&](const DBModels::ConnectionConfig& conn) -> bool
