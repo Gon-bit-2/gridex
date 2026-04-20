@@ -53,7 +53,12 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)Services\MCP\Tools\Tier1\ListConnectionsTool.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)Services\MCP\Tools\Tier1\ListTablesTool.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)Services\MCP\Tools\Tier1\DescribeTableTool.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)Services\MCP\Tools\Tier1\ListSchemasTool.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)Services\MCP\Tools\Tier1\ListRelationshipsTool.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)Services\MCP\Tools\Tier1\GetSampleRowsTool.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)Services\MCP\Tools\Tier2\QueryTool.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)Services\MCP\Tools\Tier2\ExplainQueryTool.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)Services\MCP\Tools\Tier2\SearchAcrossTablesTool.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)Services\MCP\MCPServerHost.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)Models\DatabaseAdapter.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)Models\ConnectionManager.h" />
@@ -351,7 +356,22 @@
     <ClCompile Include="$(MSBuildThisFileDirectory)Services\MCP\Tools\Tier1\DescribeTableTool.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)Services\MCP\Tools\Tier1\ListSchemasTool.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)Services\MCP\Tools\Tier1\ListRelationshipsTool.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)Services\MCP\Tools\Tier1\GetSampleRowsTool.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
     <ClCompile Include="$(MSBuildThisFileDirectory)Services\MCP\Tools\Tier2\QueryTool.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)Services\MCP\Tools\Tier2\ExplainQueryTool.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)Services\MCP\Tools\Tier2\SearchAcrossTablesTool.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="$(MSBuildThisFileDirectory)Services\MCP\MCPServerHost.cpp">
