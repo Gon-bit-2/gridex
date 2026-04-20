@@ -4,7 +4,6 @@
 
 #include "MCPTool.h"
 #include "../../../Models/ConnectionStore.h"
-#include "../../../Models/CredentialManager.h"
 #include "../../../Models/MCP/MCPAuditEntry.h"
 #include <algorithm>
 #include <windows.h>
@@ -41,11 +40,15 @@ namespace DBModels
             throw MCPToolError::connectionNotFound(narrow);
         }
 
-        // Resolve password from Windows credential vault.
-        std::wstring pass = CredentialManager::Load(connectionId);
-
+        // Password comes from ConnectionStore — it DPAPI-decrypts the
+        // `password_enc` column into ConnectionConfig::password during
+        // Load(). CredentialManager (Windows Credential Vault) isn't
+        // wired in this codebase yet; looking there would always
+        // return empty and the adapter would hit
+        // 'fe_sendauth: no password supplied' (observed against
+        // PostgreSQL).
         auto& ncPool = const_cast<MCPConnectionPool&>(pool);
-        auto adapter = ncPool.acquire(*it, pass);
+        auto adapter = ncPool.acquire(*it, it->password);
         return { adapter, *it };
     }
 
