@@ -208,14 +208,22 @@ namespace winrt::Gridex::implementation
         windowNative->get_WindowHandle(&MainHwnd);
 
         // Auto-start MCP server if user enabled it last session.
-        auto settings = DBModels::AppSettings::Load();
-        if (settings.mcpEnabled)
+        // Wrap in try-catch so a startup failure (port 3333 busy,
+        // broken settings, missing OpenSSL for cpp-httplib, etc.)
+        // never blocks the main window from activating. Users can
+        // retry from the MCP Server page after the UI is up.
+        try
         {
-            DBModels::MCPServerHost::ensureCreated(
-                settings,
-                GridexVersionAscii(),
-                DBModels::MCPTransportMode::HttpOnly);
-            DBModels::MCPServerHost::start();
+            auto settings = DBModels::AppSettings::Load();
+            if (settings.mcpEnabled)
+            {
+                DBModels::MCPServerHost::ensureCreated(
+                    settings,
+                    GridexVersionAscii(),
+                    DBModels::MCPTransportMode::HttpOnly);
+                DBModels::MCPServerHost::start();
+            }
         }
+        catch (...) { /* ignore — UI still shows */ }
     }
 }
