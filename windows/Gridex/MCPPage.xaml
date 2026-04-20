@@ -58,15 +58,37 @@
              HorizontalAlignment=Center + MaxWidth keeps the
              tab-strip centered on ultra-wide displays instead of
              letting the 5 short tab labels cluster on the left. -->
-        <Pivot Grid.Row="1" x:Name="Tabs" Margin="0,0,0,16"
+        <!-- Wrapper Grid with flexible side columns so the Pivot
+             stays centered on any window width. MinWidth on the
+             middle column guarantees the tabs + content get enough
+             room when the window is narrow. -->
+        <Grid Grid.Row="1" Margin="24,0,24,16">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" MinWidth="960" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+        <Pivot Grid.Column="1" x:Name="Tabs"
                HorizontalAlignment="Stretch"
-               HorizontalContentAlignment="Center">
+               HorizontalContentAlignment="Stretch">
+            <Pivot.Resources>
+                <!-- Shrink + tighten the tab labels so they read
+                     more like the mac SegmentedControl (~14pt) and
+                     stop dominating the top of the page. -->
+                <Style TargetType="PivotHeaderItem">
+                    <Setter Property="FontSize" Value="14" />
+                    <Setter Property="FontWeight" Value="Normal" />
+                    <Setter Property="Padding" Value="14,6,14,6" />
+                    <Setter Property="MinHeight" Value="36" />
+                </Style>
+            </Pivot.Resources>
             <PivotItem Header="Overview">
                 <ScrollViewer>
                     <!-- HorizontalAlignment=Center so the content
                          sits in the middle of the screen like the
                          mac reference instead of stretching right. -->
-                    <StackPanel Spacing="20" MaxWidth="820" HorizontalAlignment="Center">
+                    <StackPanel Spacing="20" MaxWidth="900" HorizontalAlignment="Center">
 
                         <!-- Running card -->
                         <Border Padding="16"
@@ -221,7 +243,7 @@
 
             <PivotItem Header="Setup">
                 <ScrollViewer>
-                    <StackPanel Spacing="16" MaxWidth="820" HorizontalAlignment="Center">
+                    <StackPanel Spacing="16" MaxWidth="900" HorizontalAlignment="Center">
                         <!-- Info banner — matches mac "This is a config file..." -->
                         <Border Padding="12,10" CornerRadius="6"
                                 Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}">
@@ -304,12 +326,12 @@
 
             <PivotItem Header="Config">
                 <ScrollViewer>
-                    <StackPanel Spacing="16" MaxWidth="820" HorizontalAlignment="Center">
+                    <StackPanel Spacing="16" MaxWidth="900" HorizontalAlignment="Center">
                         <TextBlock Text="Rate Limits" FontSize="14" FontWeight="SemiBold" />
                         <Grid ColumnSpacing="16" RowSpacing="8">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="140" />
+                                <ColumnDefinition Width="180" />
                             </Grid.ColumnDefinitions>
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto" />
@@ -336,7 +358,7 @@
                         <Grid ColumnSpacing="16" RowSpacing="8">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="140" />
+                                <ColumnDefinition Width="180" />
                             </Grid.ColumnDefinitions>
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto" />
@@ -372,7 +394,7 @@
                         <Grid ColumnSpacing="16" RowSpacing="8">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="140" />
+                                <ColumnDefinition Width="180" />
                             </Grid.ColumnDefinitions>
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto" />
@@ -399,5 +421,6 @@
                 </ScrollViewer>
             </PivotItem>
         </Pivot>
+        </Grid>
     </Grid>
 </Page>
