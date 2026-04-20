@@ -768,36 +768,46 @@ namespace winrt::Gridex::implementation
         loadSource(0);
 
         // Show dialog + on Import merge into ConnectionStore.
-        auto op = dlg.ShowAsync();
-        auto result = co_await op;
+        muxc::ContentDialogResult result{ muxc::ContentDialogResult::None };
+        try
+        {
+            auto op = dlg.ShowAsync();
+            result = co_await op;
+        }
+        catch (...) { co_return; }
         if (result != muxc::ContentDialogResult::Primary) co_return;
 
-        int added = 0;
+        // Snapshot selections BEFORE touching the dialog again —
+        // the ComboBox/ CheckBox handles become invalid after the
+        // dialog tears down (observed as a post-dismiss crash).
+        std::vector<size_t> selectedIdxs;
         for (size_t i = 0; i < imported->size() && i < checks->size(); ++i)
         {
-            auto chkBox = (*checks)[i];
-            auto ib = chkBox.IsChecked();
-            if (!ib || !ib.Value()) continue;
-
-            auto cfg = (*imported)[i].toConnectionConfig();
-            if (cfg.id.empty()) cfg.id = newConnectionId();
-            DBModels::ConnectionStore::Save(cfg);
-            ++added;
+            try
+            {
+                auto ib = (*checks)[i].IsChecked();
+                if (ib && ib.Value()) selectedIdxs.push_back(i);
+            }
+            catch (...) { /* checkbox detached — skip */ }
         }
 
-        RefreshList();
+        int added = 0;
+        for (size_t i : selectedIdxs)
+        {
+            try
+            {
+                auto cfg = (*imported)[i].toConnectionConfig();
+                if (cfg.id.empty()) cfg.id = newConnectionId();
+                DBModels::ConnectionStore::Save(cfg);
+                ++added;
+            }
+            catch (...) { /* one bad row shouldn't abort the batch */ }
+        }
 
-        // Brief result toast via another mini-dialog (mac uses
-        // NSAlert; ContentDialog is closest native match).
-        muxc::ContentDialog done;
-        done.Title(winrt::box_value(winrt::hstring(L"Import Complete")));
-        done.Content(winrt::box_value(winrt::hstring(
-            L"Imported " + std::to_wstring(added) + L" connection(s). Passwords "
-            L"may need to be re-entered for some sources (DataGrip, Navicat) "
-            L"because the original tools keep them in their own credential "
-            L"store.")));
-        done.CloseButtonText(L"OK");
-        done.XamlRoot(this->XamlRoot());
-        done.ShowAsync();
+        try { RefreshList(); } catch (...) {}
+        // No follow-up ContentDialog — back-to-back dialogs on the
+        // same XamlRoot are fragile in WinUI 3. User sees the new
+        // rows appear in the sidebar; that's feedback enough.
+        (void)added;
     }
 }
