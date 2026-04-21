@@ -522,11 +522,19 @@ namespace DBModels
         return funcs;
     }
 
-    // ClickHouse does not expose source for built-in functions.
+    // For user-defined functions (CREATE FUNCTION ...), system.functions
+    // stores the full DDL in `create_query`. Built-ins have no source
+    // exposed — callers get an empty string and should render a stub.
     std::wstring ClickHouseAdapter::getFunctionSource(
-        const std::wstring& /*name*/, const std::wstring& /*schema*/)
+        const std::wstring& name, const std::wstring& /*schema*/)
     {
-        return L"";
+        ensureConnected();
+        auto result = executeInternal(
+            "SELECT create_query FROM system.functions "
+            "WHERE name = " + quoteLiteral(name) + " LIMIT 1");
+        if (result.rows.empty()) return L"";
+        auto it = result.rows[0].find(L"create_query");
+        return (it != result.rows[0].end()) ? it->second : L"";
     }
 
     std::wstring ClickHouseAdapter::getCreateTableSQL(

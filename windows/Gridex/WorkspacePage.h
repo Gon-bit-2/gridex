@@ -112,6 +112,10 @@ namespace winrt::Gridex::implementation
         void SwitchContentView();
         void OnTableSelected(const std::wstring& tableName, const std::wstring& schema);
         void OpenNewQueryTab();
+        // Opens a read-only query tab showing the function's source
+        // (CREATE FUNCTION DDL or body) fetched via
+        // DatabaseAdapter::getFunctionSource.
+        void ShowFunctionSource(const std::wstring& name, const std::wstring& schema);
 
         // ── CRUD Operations ─────────────────────────
         void DeleteSelectedRow();
