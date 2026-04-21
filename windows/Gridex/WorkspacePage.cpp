@@ -2,6 +2,7 @@
 #include "xaml-includes.h"
 #include <winrt/Windows.UI.Text.h>
 #include <winrt/Windows.System.h>
+#include <unordered_map>
 #include "WorkspacePage.h"
 #include "SidebarPanel.h"
 #include "TabBarControl.h"
@@ -2125,8 +2126,16 @@ namespace winrt::Gridex::implementation
         std::vector<std::wstring> statements;
         if (!isMongo)
         {
+            // Thread a column-name → dataType map so ChangeTracker can
+            // emit dialect-correct boolean literals (unquoted TRUE/FALSE,
+            // or 0/1 for MSSQL bit) instead of the text '0'/'1' the grid
+            // round-trips for checkbox-style cells.
+            std::unordered_map<std::wstring, std::wstring> colTypes;
+            colTypes.reserve(state_.currentColumns.size());
+            for (auto& c : state_.currentColumns)
+                colTypes[c.name] = c.dataType;
             statements = changeTracker_.generateSQL(
-                tableName, schema, state_.connection.databaseType);
+                tableName, schema, state_.connection.databaseType, colTypes);
             if (statements.empty()) return;
             preview = std::to_wstring(statements.size()) + L" statement(s):\n\n";
             for (auto& s : statements) preview += s + L"\n";
