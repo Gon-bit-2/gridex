@@ -465,21 +465,71 @@ final class ClickHouseAdapter: DatabaseAdapter, SchemaInspectable, @unchecked Se
     }
 
     func updateRow(table: String, schema: String?, set: [String: RowValue], where whereClause: [String: RowValue]) async throws -> QueryResult {
-        // ClickHouse uses ALTER TABLE ... UPDATE (async mutation).
+        // ClickHouse uses ALTER TABLE ... UPDATE (async mutation). Only MergeTree-family
+        // engines support mutations — fail fast with a clear message for others.
         let d = SQLDialect.clickhouse
         let db = try resolveDB(schema)
+        try await ensureMutable(db: db, table: table, operation: "UPDATE")
         let qualified = qualifiedName(db: db, table: table, dialect: d)
         let setClauses = set.map { "\(d.quoteIdentifier($0.key)) = \(inlineValue($0.value))" }.joined(separator: ", ")
         let whereClauses = whereClause.map { "\(d.quoteIdentifier($0.key)) = \(inlineValue($0.value))" }.joined(separator: " AND ")
-        return try await executeRaw(sql: "ALTER TABLE \(qualified) UPDATE \(setClauses) WHERE \(whereClauses)")
+        return try await executeMutationWithFriendlyError(
+            sql: "ALTER TABLE \(qualified) UPDATE \(setClauses) WHERE \(whereClauses)",
+            operation: "UPDATE"
+        )
     }
 
     func deleteRow(table: String, schema: String?, where whereClause: [String: RowValue]) async throws -> QueryResult {
         let d = SQLDialect.clickhouse
         let db = try resolveDB(schema)
+        try await ensureMutable(db: db, table: table, operation: "DELETE")
         let qualified = qualifiedName(db: db, table: table, dialect: d)
         let clauses = whereClause.map { "\(d.quoteIdentifier($0.key)) = \(inlineValue($0.value))" }.joined(separator: " AND ")
-        return try await executeRaw(sql: "ALTER TABLE \(qualified) DELETE WHERE \(clauses)")
+        return try await executeMutationWithFriendlyError(
+            sql: "ALTER TABLE \(qualified) DELETE WHERE \(clauses)",
+            operation: "DELETE"
+        )
+    }
+
+    /// Pre-check the table engine: only MergeTree-family engines support ALTER ... UPDATE/DELETE.
+    /// Views, Dictionaries, and *Log engines raise CH error code 48 ("NOT_IMPLEMENTED") mid-flight;
+    /// catching it here lets us explain the *why* instead of surfacing the raw server message.
+    private func ensureMutable(db: String, table: String, operation: String) async throws {
+        let r = try? await executeRaw(sql: """
+            SELECT engine FROM system.tables
+            WHERE database = '\(escape(db))' AND name = '\(escape(table))'
+            """)
+        let engine = r?.rows.first?.first?.stringValue ?? ""
+        guard !engine.isEmpty else { return } // table unknown — let the server decide
+        if engine.contains("MergeTree") { return } // MergeTree family supports mutations
+        throw GridexError.queryExecutionFailed(
+            "ClickHouse: cannot \(operation) rows in `\(db)`.`\(table)` — engine `\(engine)` does not support row mutations. "
+            + "Only MergeTree-family engines accept ALTER TABLE ... \(operation). "
+            + "For Dictionary/View tables, update the underlying source instead."
+        )
+    }
+
+    /// Wrap mutation execution so CH server errors about non-mutable engines surface with a
+    /// friendlier explanation even when our pre-check is bypassed (e.g. race with schema change).
+    private func executeMutationWithFriendlyError(sql: String, operation: String) async throws -> QueryResult {
+        do {
+            return try await executeRaw(sql: sql)
+        } catch let err as GridexError {
+            if case .queryExecutionFailed(let msg) = err {
+                let lower = msg.lowercased()
+                if lower.contains("lightweight updates are not supported")
+                    || lower.contains("not_implemented")
+                    || lower.contains("read-only")
+                    || lower.contains("mutations are not supported") {
+                    throw GridexError.queryExecutionFailed(
+                        "ClickHouse: \(operation) failed — this table's engine does not support row mutations. "
+                        + "Only MergeTree-family engines accept ALTER TABLE ... \(operation). "
+                        + "Server message: \(msg)"
+                    )
+                }
+            }
+            throw err
+        }
     }
 
     // MARK: - Transactions (no-op — ClickHouse has no traditional transactions)

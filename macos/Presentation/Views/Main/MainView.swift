@@ -1575,10 +1575,7 @@ struct DatabaseSwitcherDialog: View {
         guard let name = selected, let adapter = appState.activeAdapter else { return }
         do {
             try await adapter.dropDatabase(name: name)
-            // Refresh database list
-            if let databases = try? await adapter.listDatabases() {
-                appState.availableDatabases = databases
-            }
+            await appState.refreshAvailableDatabases()
             selected = appState.currentDatabaseName ?? filteredDatabases.first
         } catch {
             deleteError = error.localizedDescription
@@ -1801,10 +1798,8 @@ struct NewDatabaseSheet: View {
             return
         }
 
-        // Refresh database list and switch
-        if let databases = try? await adapter.listDatabases() {
-            appState.availableDatabases = databases
-        }
+        // Refresh database list before dismissing so the picker/switcher updates immediately
+        await appState.refreshAvailableDatabases()
         dismiss()
         onCreated(dbName)
     }

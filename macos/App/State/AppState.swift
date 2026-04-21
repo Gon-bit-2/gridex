@@ -727,6 +727,19 @@ final class AppState: ObservableObject {
         Task { await loadSidebar(config: config, adapter: adapter) }
     }
 
+    /// Re-fetch the database list from the active adapter and publish it.
+    /// Call after CREATE DATABASE / DROP DATABASE so pickers and switchers update
+    /// without waiting for the user to reconnect.
+    func refreshAvailableDatabases() async {
+        guard let adapter = activeAdapter else { return }
+        do {
+            let databases = try await adapter.listDatabases()
+            availableDatabases = databases
+        } catch {
+            print("refreshAvailableDatabases failed: \(error)")
+        }
+    }
+
     func loadSavedConnections() async {
         do {
             savedConnections = try await container.connectionRepository.fetchAll()
