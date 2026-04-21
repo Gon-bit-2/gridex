@@ -2,6 +2,7 @@
 #include "xaml-includes.h"
 #include <winrt/Windows.UI.Text.h>
 #include <winrt/Windows.System.h>
+#include <unordered_map>
 #include "WorkspacePage.h"
 #include "SidebarPanel.h"
 #include "TabBarControl.h"
@@ -17,6 +18,14 @@
 #include "Models/ERDiagramService.h"
 #include "Models/AppSettings.h"
 #include "App.xaml.h"
+#ifdef GRIDEX_ENTERPRISE
+#include "row-relationship-graph/EERowRelationshipDialog.h"
+#include "mock-data-generator/EEMockDataConfigDialog.h"
+#include "mock-data-generator/EEMockDataProgressDialog.h"
+#include "mock-data-generator/EEMockDataHeuristics.h"
+#include "mock-data-generator/EEMockDataGeneratorService.h"
+#include "connection-monitor/EEConnectionMonitorPage.h"
+#endif
 #include <winrt/Microsoft.UI.Xaml.Controls.h>
 #include <winrt/Microsoft.UI.Input.h>
 #include <winrt/Microsoft.Web.WebView2.Core.h>
@@ -159,12 +168,18 @@ namespace winrt::Gridex::implementation
         // DataGrid callbacks
         DataGrid().as<DataGridView>()->OnRowSelected = [this](int rowIndex)
         {
-            if (rowIndex >= 0 && rowIndex < static_cast<int>(state_.currentData.rows.size()))
+            const bool valid = rowIndex >= 0
+                && rowIndex < static_cast<int>(state_.currentData.rows.size());
+            if (valid)
             {
                 Details().as<DetailsPanel>()->ShowRow(
                     state_.currentData.columnNames,
                     state_.currentData.rows[rowIndex]);
             }
+            // Duplicate only makes sense when a row is selected; toggling
+            // the button here keeps the enable state in sync with grid
+            // selection without a separate subscription.
+            DuplicateRowBtn().IsEnabled(valid);
         };
 
         // Delete key on grid → same as Delete toolbar button (mark row
@@ -189,6 +204,12 @@ namespace winrt::Gridex::implementation
             if (!refTable.empty())
                 OnTableSelected(refTable, currentSchema_);
         };
+
+        // Enterprise "View Relationship" menu item is wired in
+        // InitializeConnection (per-connection) instead of here, so that
+        // switching from a relational DB to Mongo/Redis actually toggles
+        // the menu item's visibility. At constructor time we don't yet
+        // know the real databaseType.
 
         // Wire structure view ALTER apply
         Structure().as<StructureView>()->OnApplyAlter = [this](const std::vector<std::wstring>& sqls)
@@ -820,6 +841,44 @@ namespace winrt::Gridex::implementation
             ImportDataAsync(tableName, schema);
         };
 
+#ifdef GRIDEX_ENTERPRISE
+        // EE: right-click table → Generate Data. Wired only on SQL
+        // databases since the feature requires INSERT + transactions.
+        {
+            auto dbType = state_.connection.databaseType;
+            bool isSql =
+                dbType == DBModels::DatabaseType::PostgreSQL ||
+                dbType == DBModels::DatabaseType::MySQL ||
+                dbType == DBModels::DatabaseType::SQLite;
+            if (isSql) {
+                Sidebar().as<SidebarPanel>()->OnGenerateMockData =
+                    [this](const std::wstring& tableName,
+                           const std::wstring& schema)
+                {
+                    GenerateMockDataAsync(tableName, schema);
+                };
+            } else {
+                Sidebar().as<SidebarPanel>()->OnGenerateMockData = nullptr;
+            }
+        }
+
+        // EE: sidebar header "⚡" → Realtime Connection Monitor. Postgres
+        // only for v1 (the feature depends on pg_stat_activity shape).
+        {
+            auto dbType = state_.connection.databaseType;
+            bool isPg = dbType == DBModels::DatabaseType::PostgreSQL;
+            auto sb = Sidebar().as<SidebarPanel>();
+            if (isPg) {
+                sb->OnOpenConnectionMonitor = [this]() {
+                    OpenConnectionMonitor();
+                };
+            } else {
+                sb->OnOpenConnectionMonitor = nullptr;
+            }
+            sb->SetMonitorButtonVisible(isPg);
+        }
+#endif
+
         // Sidebar ER diagram — right-click Database/Schema group → Show ER Diagram
         Sidebar().as<SidebarPanel>()->OnShowERDiagram = [this](const std::wstring& schema)
         {
@@ -989,6 +1048,9 @@ namespace winrt::Gridex::implementation
 
         AddRowBtn().Click([this](winrt::Windows::Foundation::IInspectable const&, mux::RoutedEventArgs const&)
         { AddNewRow(); });
+
+        DuplicateRowBtn().Click([this](winrt::Windows::Foundation::IInspectable const&, mux::RoutedEventArgs const&)
+        { DuplicateSelectedRow(); });
 
         PrevPageBtn().Click([this](winrt::Windows::Foundation::IInspectable const&, mux::RoutedEventArgs const&)
         { PrevPage(); });
@@ -1350,6 +1412,123 @@ namespace winrt::Gridex::implementation
             StatusBar().as<StatusBarControl>()->SetStatus(
                 L"Disconnected", L"--", 0, 0.0, 0.0);
         }
+
+#ifdef GRIDEX_ENTERPRISE
+        // Enterprise: wire "View Relationship" based on the ACTIVE
+        // connection. Runs on every switch so moving from PG to Mongo
+        // clears the callback and DataGridView's Opening handler
+        // collapses the menu item (gate: callback != nullptr).
+        {
+            auto dbType = state_.connection.databaseType;
+            bool isRelational =
+                dbType == DBModels::DatabaseType::PostgreSQL ||
+                dbType == DBModels::DatabaseType::MySQL ||
+                dbType == DBModels::DatabaseType::SQLite ||
+                dbType == DBModels::DatabaseType::MSSQLServer;
+
+            if (isRelational)
+            {
+                DataGrid().as<DataGridView>()->OnViewRelationshipsRequested = [this]()
+                {
+                    int rowIdx = DataGrid().as<DataGridView>()->GetSelectedRowIndex();
+                    if (rowIdx < 0) return;
+                    if (rowIdx >= static_cast<int>(state_.currentData.rows.size())) return;
+                    if (!connMgr_.isConnected()) return;
+
+                    std::wstring table, schema;
+                    for (const auto& t : state_.tabs)
+                    {
+                        if (t.id == state_.activeTabId
+                            && t.type == DBModels::TabType::DataGrid)
+                        {
+                            table = t.tableName;
+                            schema = t.schema.empty() ? currentSchema_ : t.schema;
+                            break;
+                        }
+                    }
+                    if (table.empty()) return;
+
+                    auto adapter = connMgr_.getActiveAdapter();
+                    if (!adapter) return;
+
+                    ::Gridex::EE::RowRelationshipGraph::BuildInput input;
+                    input.adapter = adapter;
+                    input.dbType = state_.connection.databaseType;
+                    input.schema = schema;
+                    input.table = table;
+                    input.columns = state_.currentColumns;
+                    input.rowValues = state_.currentData.rows[rowIdx];
+
+                    auto projected = winrt::make<
+                        winrt::Gridex::implementation::EERowRelationshipDialog>();
+                    auto impl = winrt::get_self<
+                        winrt::Gridex::implementation::EERowRelationshipDialog>(projected);
+                    impl->SetInput(std::move(input));
+
+                    // Inline overlay inside ContentArea — feels like a
+                    // workspace page rather than a popup. Capture current
+                    // visibilities + chrome widths so we can restore them
+                    // after the user closes the view.
+                    auto contentArea = ContentArea();
+
+                    struct LayoutSnapshot
+                    {
+                        std::vector<std::pair<mux::UIElement, mux::Visibility>> children;
+                        double sidebarWidth = 0;
+                        double detailsWidth = 0;
+                        mux::Visibility tabBarVis = mux::Visibility::Visible;
+                    };
+                    auto snapshot = std::make_shared<LayoutSnapshot>();
+                    for (auto const& child : contentArea.Children())
+                    {
+                        if (auto fe = child.try_as<mux::UIElement>())
+                            snapshot->children.push_back({ fe, fe.Visibility() });
+                    }
+                    snapshot->sidebarWidth = SidebarColumn().Width().Value;
+                    snapshot->detailsWidth = DetailsColumn().Width().Value;
+                    snapshot->tabBarVis = TabBar().Visibility();
+
+                    // Hide everything else in ContentArea; collapse side
+                    // panels so the diagram uses the full width. Keep
+                    // TopToolbar + StatusBar so the connection name is
+                    // still visible.
+                    for (auto& [child, _] : snapshot->children)
+                        child.Visibility(mux::Visibility::Collapsed);
+                    SidebarColumn().Width(mux::GridLengthHelper::FromPixels(0));
+                    DetailsColumn().Width(mux::GridLengthHelper::FromPixels(0));
+                    TabBar().Visibility(mux::Visibility::Collapsed);
+
+                    // Close handler restores the captured layout and
+                    // detaches the UserControl (triggers its Unloaded →
+                    // cleanup of the SVG temp file).
+                    impl->OnCloseRequested = [this, snapshot, projected]()
+                    {
+                        auto contentArea = ContentArea();
+                        uint32_t idx = 0;
+                        if (contentArea.Children().IndexOf(projected, idx))
+                            contentArea.Children().RemoveAt(idx);
+
+                        for (auto& [child, vis] : snapshot->children)
+                            child.Visibility(vis);
+                        SidebarColumn().Width(mux::GridLengthHelper::FromPixels(
+                            snapshot->sidebarWidth > 0 ? snapshot->sidebarWidth : 280));
+                        DetailsColumn().Width(mux::GridLengthHelper::FromPixels(
+                            snapshot->detailsWidth > 0 ? snapshot->detailsWidth : 260));
+                        TabBar().Visibility(snapshot->tabBarVis);
+                    };
+
+                    contentArea.Children().Append(projected);
+                };
+            }
+            else
+            {
+                // Mongo / Redis: clear the callback so the menu item
+                // returns to Collapsed after a switch away from a
+                // relational connection.
+                DataGrid().as<DataGridView>()->OnViewRelationshipsRequested = nullptr;
+            }
+        }
+#endif // GRIDEX_ENTERPRISE
     }
 
     // ── Sidebar Data Loading ────────────────────────────
@@ -1921,6 +2100,52 @@ namespace winrt::Gridex::implementation
         UpdatePendingUI();
     }
 
+    // Clone the currently-selected grid row as a pending INSERT so the
+    // user can tweak a couple fields (e.g. unique name) before commit.
+    // Mirrors AddNewRow for skipped columns — IDENTITY, SQL-expression
+    // PK defaults, and expression defaults like now()/nextval() stay
+    // server-generated so the copy doesn't collide with the source.
+    void WorkspacePage::DuplicateSelectedRow()
+    {
+        if (state_.currentColumns.empty()) return;
+        auto* sel = DataGrid().as<DataGridView>()->GetSelectedRow();
+        if (!sel) return;
+
+        DBModels::TableRow newRow;
+        for (auto& col : state_.currentColumns)
+        {
+            if (col.comment == L"IDENTITY") continue;
+            if (col.isPrimaryKey && IsSqlExpression(col.defaultValue)) continue;
+            if (IsSqlExpression(col.defaultValue)) continue;
+
+            auto it = sel->find(col.name);
+            if (it != sel->end())
+                newRow[col.name] = it->second; // copy source value as-is (incl. NULL sentinel)
+            else if (!col.defaultValue.empty() && col.defaultValue != L"NULL")
+                newRow[col.name] = col.defaultValue;
+            else if (col.nullable)
+                newRow[col.name] = L"NULL";
+            else
+                newRow[col.name] = L"";
+        }
+
+        // Display row carries the auto-gen placeholders (e.g.
+        // "gen_random_uuid()") for skipped columns so the new grid row
+        // visually matches a fresh insert.
+        DBModels::TableRow displayRow = newRow;
+        for (auto& col : state_.currentColumns)
+        {
+            if (displayRow.find(col.name) == displayRow.end())
+                displayRow[col.name] = col.defaultValue;
+        }
+
+        state_.currentData.rows.push_back(displayRow);
+        int newRowIndex = static_cast<int>(state_.currentData.rows.size()) - 1;
+        changeTracker_.trackInsert(newRow, newRowIndex);
+        DataGrid().as<DataGridView>()->SetData(state_.currentData);
+        UpdatePendingUI();
+    }
+
     void WorkspacePage::CommitChanges()
     {
         // Flush any in-flight inline cell edit before reading the
@@ -1956,8 +2181,16 @@ namespace winrt::Gridex::implementation
         std::vector<std::wstring> statements;
         if (!isMongo)
         {
+            // Thread a column-name → dataType map so ChangeTracker can
+            // emit dialect-correct boolean literals (unquoted TRUE/FALSE,
+            // or 0/1 for MSSQL bit) instead of the text '0'/'1' the grid
+            // round-trips for checkbox-style cells.
+            std::unordered_map<std::wstring, std::wstring> colTypes;
+            colTypes.reserve(state_.currentColumns.size());
+            for (auto& c : state_.currentColumns)
+                colTypes[c.name] = c.dataType;
             statements = changeTracker_.generateSQL(
-                tableName, schema, state_.connection.databaseType);
+                tableName, schema, state_.connection.databaseType, colTypes);
             if (statements.empty()) return;
             preview = std::to_wstring(statements.size()) + L" statement(s):\n\n";
             for (auto& s : statements) preview += s + L"\n";
@@ -4187,4 +4420,194 @@ g.er-selected > foreignObject > div.er-card{
                               state_.statusRenderTimeMs);
         UpdatePaginationUI();
     }
+
+#ifdef GRIDEX_ENTERPRISE
+    // Full-page overlay host for the Realtime Connection Monitor.
+    // Same snapshot-and-restore pattern as the row-relationship diagram
+    // so returning from the monitor drops the user back in their tab
+    // layout exactly as they left it.
+    void WorkspacePage::OpenConnectionMonitor()
+    {
+        if (!connMgr_.isConnected()) return;
+        auto adapter = connMgr_.getActiveAdapter();
+        if (!adapter) return;
+
+        auto projected = winrt::make<
+            winrt::Gridex::implementation::EEConnectionMonitorPage>();
+        auto impl = winrt::get_self<
+            winrt::Gridex::implementation::EEConnectionMonitorPage>(projected);
+        impl->SetAdapter(adapter.get());
+
+        auto contentArea = ContentArea();
+
+        struct LayoutSnapshot
+        {
+            std::vector<std::pair<mux::UIElement, mux::Visibility>> children;
+            double sidebarWidth = 0;
+            double detailsWidth = 0;
+            mux::Visibility tabBarVis = mux::Visibility::Visible;
+        };
+        auto snapshot = std::make_shared<LayoutSnapshot>();
+        for (auto const& child : contentArea.Children()) {
+            if (auto fe = child.try_as<mux::UIElement>())
+                snapshot->children.push_back({ fe, fe.Visibility() });
+        }
+        snapshot->sidebarWidth = SidebarColumn().Width().Value;
+        snapshot->detailsWidth = DetailsColumn().Width().Value;
+        snapshot->tabBarVis = TabBar().Visibility();
+
+        for (auto& [child, _] : snapshot->children)
+            child.Visibility(mux::Visibility::Collapsed);
+        DetailsColumn().Width(mux::GridLengthHelper::FromPixels(0));
+        TabBar().Visibility(mux::Visibility::Collapsed);
+
+        impl->OnCloseRequested = [this, snapshot, projected]() {
+            auto ca = ContentArea();
+            uint32_t idx = 0;
+            if (ca.Children().IndexOf(projected, idx))
+                ca.Children().RemoveAt(idx);
+            for (auto& [child, vis] : snapshot->children)
+                child.Visibility(vis);
+            DetailsColumn().Width(mux::GridLengthHelper::FromPixels(
+                snapshot->detailsWidth > 0 ? snapshot->detailsWidth : 260));
+            TabBar().Visibility(snapshot->tabBarVis);
+        };
+
+        contentArea.Children().Append(projected);
+    }
+#endif
+
+#ifdef GRIDEX_ENTERPRISE
+    // ── EE: Mock Data Generator orchestration ─────────────────
+    // Flow: describeTable → seed heuristic specs → show config dialog →
+    // if Start pressed, run service + show progress dialog → on finish,
+    // show error or reload the grid.
+    winrt::fire_and_forget WorkspacePage::GenerateMockDataAsync(
+        std::wstring tableName, std::wstring schema)
+    {
+        if (!connMgr_.isConnected()) co_return;
+        auto adapter = connMgr_.getActiveAdapter();
+        if (!adapter) co_return;
+
+        // Introspect columns. Skip if the table disappeared or returned empty.
+        std::vector<DBModels::ColumnInfo> columns;
+        std::wstring describeErr;
+        try { columns = adapter->describeTable(tableName, schema); }
+        catch (const std::exception& e) {
+            describeErr = std::wstring(e.what(), e.what() + std::strlen(e.what()));
+        }
+        catch (...) { describeErr = L"Unknown error describing table."; }
+        if (!describeErr.empty()) {
+            muxc::ContentDialog err;
+            err.Title(winrt::box_value(winrt::hstring{L"Can't describe table"}));
+            err.Content(winrt::box_value(winrt::hstring{describeErr}));
+            err.CloseButtonText(L"OK");
+            err.XamlRoot(this->XamlRoot());
+            co_await err.ShowAsync();
+            co_return;
+        }
+        if (columns.empty()) co_return;
+
+        // Heuristic-seed specs.
+        std::vector<::Gridex::EE::MockData::EEColumnSpec> specs;
+        specs.reserve(columns.size());
+        for (const auto& c : columns)
+            specs.push_back(::Gridex::EE::MockData::EEMockDataHeuristics::toSpec(c));
+
+        // Build config dialog.
+        auto configCtrl = winrt::make<
+            winrt::Gridex::implementation::EEMockDataConfigDialog>();
+        auto configImpl = winrt::get_self<
+            winrt::Gridex::implementation::EEMockDataConfigDialog>(configCtrl);
+        configImpl->SetContext(schema, tableName, std::move(specs));
+
+        muxc::ContentDialog cfgDlg;
+        cfgDlg.Title(winrt::box_value(winrt::hstring{L"Generate Mock Data"}));
+        cfgDlg.Content(configCtrl);
+        cfgDlg.PrimaryButtonText(L"Start");
+        cfgDlg.CloseButtonText(L"Cancel");
+        cfgDlg.DefaultButton(muxc::ContentDialogButton::Primary);
+        cfgDlg.XamlRoot(this->XamlRoot());
+        // ContentDialog caps width via a theme resource; override so the
+        // column list + throttle NumberBoxes don't clip on the right.
+        cfgDlg.Resources().Insert(
+            winrt::box_value(winrt::hstring{L"ContentDialogMaxWidth"}),
+            winrt::box_value(820.0));
+
+        // Intercept Primary: validate + stop close if invalid.
+        auto cfgDeferralToken = cfgDlg.PrimaryButtonClick(
+            [configImpl](auto const& sender, auto const& args)
+            {
+                if (!configImpl->BuildConfig().has_value()) {
+                    args.Cancel(true);   // keep dialog open; error shown inline
+                }
+            });
+
+        auto result = co_await cfgDlg.ShowAsync();
+        cfgDlg.PrimaryButtonClick(cfgDeferralToken);
+        if (result != muxc::ContentDialogResult::Primary) co_return;
+
+        auto cfgOpt = configImpl->BuildConfig();
+        if (!cfgOpt) co_return;
+
+        // Start service (static) — schedules UI-thread DispatcherQueueTimer.
+        auto state = ::Gridex::EE::MockData::EEMockDataGeneratorService::start(
+            adapter.get(), *cfgOpt);
+
+        // Show progress dialog.
+        auto progCtrl = winrt::make<
+            winrt::Gridex::implementation::EEMockDataProgressDialog>();
+        auto progImpl = winrt::get_self<
+            winrt::Gridex::implementation::EEMockDataProgressDialog>(progCtrl);
+        progImpl->Attach(state);
+
+        muxc::ContentDialog progDlg;
+        progDlg.Title(winrt::box_value(winrt::hstring{L"Generating"}));
+        progDlg.Content(progCtrl);
+        progDlg.PrimaryButtonText(L"Cancel");
+        progDlg.DefaultButton(muxc::ContentDialogButton::Primary);
+        progDlg.XamlRoot(this->XamlRoot());
+
+        // Primary button = Cancel while running; changes to "Close" on finish.
+        auto cancelToken = progDlg.PrimaryButtonClick(
+            [progImpl](auto const&, auto const& args)
+            {
+                if (!progImpl->IsFinished()) {
+                    progImpl->RequestCancel();
+                    args.Cancel(true);   // keep dialog open; worker still draining
+                }
+            });
+
+        progImpl->OnFinished = [&progDlg]()
+        {
+            // Job done: swap Cancel → Close so the dialog can be dismissed.
+            // We deliberately don't auto-Hide; on error the user reads the
+            // inline message first, then clicks Close.
+            progDlg.PrimaryButtonText(L"Close");
+        };
+
+        co_await progDlg.ShowAsync();
+        progDlg.PrimaryButtonClick(cancelToken);
+
+        auto err = state->readError();
+        if (!err.empty()) {
+            muxc::ContentDialog eDlg;
+            eDlg.Title(winrt::box_value(winrt::hstring{L"Generation failed"}));
+            eDlg.Content(winrt::box_value(winrt::hstring{err}));
+            eDlg.CloseButtonText(L"OK");
+            eDlg.XamlRoot(this->XamlRoot());
+            co_await eDlg.ShowAsync();
+            co_return;
+        }
+
+        // Refresh the grid if the user is currently viewing the target table.
+        if (state_.connection.databaseType != DBModels::DatabaseType::Redis &&
+            state_.statusSchema.empty() == false &&
+            state_.statusSchema == schema) {
+            ReloadCurrentTable();
+        } else {
+            ReloadCurrentTable();
+        }
+    }
+#endif
 }

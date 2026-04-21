@@ -204,6 +204,24 @@ namespace winrt::Gridex::implementation
         RenderTree();
     }
 
+    // Extension hook: reveals the "⚡" action button only when a host
+    // (e.g. EE WorkspacePage) has wired OnOpenConnectionMonitor. Invoked
+    // by SetItems / SetDatabaseType callers after they set the callback.
+    // The button click just forwards to the callback; host owns the flow.
+    void SidebarPanel::MonitorButton_Click(
+        winrt::Windows::Foundation::IInspectable const&,
+        mux::RoutedEventArgs const&)
+    {
+        if (OnOpenConnectionMonitor) OnOpenConnectionMonitor();
+    }
+
+    void SidebarPanel::SetMonitorButtonVisible(bool visible)
+    {
+        MonitorButton().Visibility(visible
+            ? mux::Visibility::Visible
+            : mux::Visibility::Collapsed);
+    }
+
     bool SidebarPanel::MatchesSearch(const DBModels::SidebarItem& item) const
     {
         if (searchQuery_.empty()) return true;
@@ -445,6 +463,20 @@ namespace winrt::Gridex::implementation
                 importItem.Click([this, exportName, exportSchema](auto&&, auto&&)
                 { if (OnImportTable) OnImportTable(exportName, exportSchema); });
                 contextMenu.Items().Append(importItem);
+
+                // Generate Data — optional extension hook. Item only appears
+                // when a host wires OnGenerateMockData (e.g. EE build);
+                // OSS build leaves callback unset → menu unchanged.
+                if (item.type == DBModels::SidebarItemType::Table && OnGenerateMockData)
+                {
+                    muxc::MenuFlyoutItem genItem;
+                    genItem.Text(L"Generate Data...");
+                    genItem.Icon(muxc::FontIcon());
+                    genItem.Icon().as<muxc::FontIcon>().Glyph(L"\xE8BD"); // AutoFillTemplate
+                    genItem.Click([this, exportName, exportSchema](auto&&, auto&&)
+                    { if (OnGenerateMockData) OnGenerateMockData(exportName, exportSchema); });
+                    contextMenu.Items().Append(genItem);
+                }
 
                 // Truncate + Delete — destructive. Only offered for
                 // real tables (not views) since views can't be truncated

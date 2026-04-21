@@ -2,7 +2,9 @@
 #include <string>
 #include <vector>
 #include <set>
+#include <unordered_map>
 #include <algorithm>
+#include <cwctype>
 #include "TableRow.h"
 #include "DatabaseType.h"
 
@@ -118,11 +120,17 @@ namespace DBModels
             return indices;
         }
 
-        // Generate SQL statements for all pending changes
+        // Generate SQL statements for all pending changes.
+        // `columnTypes` lets generators emit dialect-correct literals
+        // for typed columns (e.g. boolean → unquoted TRUE/FALSE instead
+        // of the text '0'/'1' that round-trips through the edit UI).
+        // Safe to pass an empty map; callers who have schema info should
+        // populate it from the table's ColumnInfo list.
         std::vector<std::wstring> generateSQL(
             const std::wstring& table,
             const std::wstring& schema,
-            DatabaseType dbType) const
+            DatabaseType dbType,
+            const std::unordered_map<std::wstring, std::wstring>& columnTypes = {}) const
         {
             std::vector<std::wstring> statements;
 
@@ -131,10 +139,10 @@ namespace DBModels
                 switch (edit.type)
                 {
                 case EditType::Insert:
-                    statements.push_back(generateInsert(table, schema, edit, dbType));
+                    statements.push_back(generateInsert(table, schema, edit, dbType, columnTypes));
                     break;
                 case EditType::Update:
-                    statements.push_back(generateUpdate(table, schema, edit, dbType));
+                    statements.push_back(generateUpdate(table, schema, edit, dbType, columnTypes));
                     break;
                 case EditType::Delete:
                     statements.push_back(generateDelete(table, schema, edit, dbType));
@@ -168,6 +176,56 @@ namespace DBModels
             return escaped;
         }
 
+        // Boolean column detection. Covers the dialect-specific spellings
+        // driver metadata actually hands back (PG: "boolean"/"bool";
+        // MSSQL: "bit"; MySQL: "tinyint(1)"/"bool"/"boolean"; SQLite:
+        // "boolean"). tinyint without (1) is a regular integer, skip.
+        static bool isBooleanType(const std::wstring& dataType)
+        {
+            std::wstring t = dataType;
+            std::transform(t.begin(), t.end(), t.begin(),
+                [](wchar_t c) { return std::towlower(c); });
+            // Strip size/precision so "boolean(1)" / "bit(1)" still match.
+            auto paren = t.find(L'(');
+            std::wstring head = (paren == std::wstring::npos) ? t : t.substr(0, paren);
+            if (head == L"bool" || head == L"boolean" || head == L"bit") return true;
+            // tinyint(1) is MySQL's conventional boolean carrier; plain
+            // tinyint is a 1-byte int and must keep integer formatting.
+            if (head == L"tinyint" && t.find(L"(1)") != std::wstring::npos) return true;
+            return false;
+        }
+
+        // Map the text the grid round-trips ("0"/"1"/"t"/"f"/"true"/"false"/
+        // "TRUE"/"FALSE"/"") to a dialect-appropriate unquoted boolean
+        // literal. MSSQL bit wants 0/1 (no TRUE keyword); everyone else
+        // accepts TRUE/FALSE.
+        static std::wstring booleanLit(const std::wstring& value, DatabaseType dbType)
+        {
+            if (isNullCell(value)) return L"NULL";
+            std::wstring v = value;
+            std::transform(v.begin(), v.end(), v.begin(),
+                [](wchar_t c) { return std::towlower(c); });
+            const bool truthy =
+                (v == L"1" || v == L"t" || v == L"true" || v == L"yes" || v == L"y");
+            if (dbType == DatabaseType::MSSQLServer)
+                return truthy ? L"1" : L"0";
+            return truthy ? L"TRUE" : L"FALSE";
+        }
+
+        // Type-aware literal: route boolean columns through booleanLit,
+        // everything else keeps the existing text-quoted behaviour.
+        static std::wstring quoteLitTyped(
+            const std::wstring& column,
+            const std::wstring& value,
+            DatabaseType dbType,
+            const std::unordered_map<std::wstring, std::wstring>& columnTypes)
+        {
+            auto it = columnTypes.find(column);
+            if (it != columnTypes.end() && isBooleanType(it->second))
+                return booleanLit(value, dbType);
+            return quoteLit(value);
+        }
+
         static std::wstring qualifiedTable(const std::wstring& table,
                                            const std::wstring& schema,
                                            DatabaseType dbType)
@@ -194,10 +252,12 @@ namespace DBModels
             return where;
         }
 
-        static std::wstring generateInsert(const std::wstring& table,
-                                           const std::wstring& schema,
-                                           const PendingEdit& edit,
-                                           DatabaseType dbType)
+        static std::wstring generateInsert(
+            const std::wstring& table,
+            const std::wstring& schema,
+            const PendingEdit& edit,
+            DatabaseType dbType,
+            const std::unordered_map<std::wstring, std::wstring>& columnTypes = {})
         {
             std::wstring sql = L"INSERT INTO " + qualifiedTable(table, schema, dbType) + L" (";
             std::wstring vals;
@@ -212,7 +272,7 @@ namespace DBModels
                 if (!isNullCell(val) && val.empty()) continue;
                 if (!first) { sql += L", "; vals += L", "; }
                 sql += quoteId(col, dbType);
-                vals += quoteLit(val);
+                vals += quoteLitTyped(col, val, dbType, columnTypes);
                 first = false;
             }
             // All columns blank — use each dialect's all-defaults insert
@@ -231,13 +291,16 @@ namespace DBModels
             return sql;
         }
 
-        static std::wstring generateUpdate(const std::wstring& table,
-                                           const std::wstring& schema,
-                                           const PendingEdit& edit,
-                                           DatabaseType dbType)
+        static std::wstring generateUpdate(
+            const std::wstring& table,
+            const std::wstring& schema,
+            const PendingEdit& edit,
+            DatabaseType dbType,
+            const std::unordered_map<std::wstring, std::wstring>& columnTypes = {})
         {
             std::wstring sql = L"UPDATE " + qualifiedTable(table, schema, dbType) + L" SET ";
-            sql += quoteId(edit.column, dbType) + L" = " + quoteLit(edit.newValue);
+            sql += quoteId(edit.column, dbType) + L" = "
+                + quoteLitTyped(edit.column, edit.newValue, dbType, columnTypes);
             sql += L" WHERE " + buildWhere(edit.primaryKey, dbType);
             return sql;
         }

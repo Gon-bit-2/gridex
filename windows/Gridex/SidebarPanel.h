@@ -40,6 +40,19 @@ namespace winrt::Gridex::implementation
         std::function<void(const std::wstring& tableName,
                            const std::wstring& schema)> OnImportTable;
 
+        // Extension hook: generic "Generate Data..." menu item on SQL tables.
+        // Hidden from the menu when callback is unset (keeps OSS menu clean).
+        std::function<void(const std::wstring& tableName,
+                           const std::wstring& schema)> OnGenerateMockData;
+
+        // Extension hook: sidebar header "⚡" action button (EE-only:
+        // opens the Realtime Connection Monitor overlay). Button is
+        // Collapsed unless the host wires this callback. Host calls
+        // SetMonitorButtonVisible(true) after the Postgres connection
+        // is active.
+        std::function<void()> OnOpenConnectionMonitor;
+        void SetMonitorButtonVisible(bool visible);
+
         // Callback for "Show ER Diagram" on a Database/Schema group
         std::function<void(const std::wstring& schema)> OnShowERDiagram;
 
@@ -77,6 +90,9 @@ namespace winrt::Gridex::implementation
             winrt::Windows::Foundation::IInspectable const& sender,
             winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e);
         void SearchBox_TextChanged(
+            winrt::Windows::Foundation::IInspectable const& sender,
+            winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e);
+        void MonitorButton_Click(
             winrt::Windows::Foundation::IInspectable const& sender,
             winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e);
 

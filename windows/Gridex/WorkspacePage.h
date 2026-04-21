@@ -116,6 +116,7 @@ namespace winrt::Gridex::implementation
         // ── CRUD Operations ─────────────────────────
         void DeleteSelectedRow();
         void AddNewRow();
+        void DuplicateSelectedRow();
         void CommitChanges();
         void DiscardChanges();
         DBModels::TableRow ExtractPrimaryKey(int rowIndex);
@@ -172,6 +173,22 @@ namespace winrt::Gridex::implementation
         // ── Redis-specific actions ────────────────
         winrt::fire_and_forget FlushRedisDbAsync();
         winrt::fire_and_forget BrowseRedisKeysAsync();
+
+#ifdef GRIDEX_ENTERPRISE
+        // ── EE Mock Data Generator ────────────────
+        // Opens config dialog, spawns the service, shows progress, and
+        // reloads the grid on success. Gated because it pulls EE-only
+        // headers; the callback itself is never wired in OSS so the
+        // menu entry is hidden there.
+        winrt::fire_and_forget GenerateMockDataAsync(
+            std::wstring tableName, std::wstring schema);
+
+        // ── EE Realtime Connection Monitor ─────────
+        // Mounts the WebView2-hosted monitor as a full-page overlay,
+        // mirroring EERowRelationshipDialog. Postgres-only entry — the
+        // sidebar button is hidden on other DB types.
+        void OpenConnectionMonitor();
+#endif
 
         // Shared progress state for dump/restore background jobs
         struct DumpRestoreJobState

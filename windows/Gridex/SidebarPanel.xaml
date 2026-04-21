@@ -13,11 +13,13 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <!-- Tab bar: Items | Queries | History -->
+        <!-- Tab bar: Items | Queries | History | (spacer) | Action slot -->
         <Grid Grid.Row="0" Padding="8,6">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
             <ToggleButton x:Name="ItemsTab" Grid.Column="0"
@@ -41,6 +43,17 @@
                           ToolTipService.ToolTip="Query History">
                 <FontIcon Glyph="&#xE81C;" FontSize="13" />
             </ToggleButton>
+            <!-- Right-aligned action button (EE: opens Realtime Connection
+                 Monitor). Hidden when no callback wired so OSS build has
+                 no dead button. -->
+            <Button x:Name="MonitorButton" Grid.Column="4"
+                    Padding="6,4"
+                    Background="Transparent" BorderThickness="0"
+                    Visibility="Collapsed"
+                    Click="MonitorButton_Click"
+                    ToolTipService.ToolTip="Realtime Connection Monitor">
+                <FontIcon Glyph="&#xE950;" FontSize="13" />
+            </Button>
         </Grid>
 
         <!-- Search box -->
