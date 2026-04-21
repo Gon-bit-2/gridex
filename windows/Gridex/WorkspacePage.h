@@ -181,6 +181,12 @@ namespace winrt::Gridex::implementation
         // menu entry is hidden there.
         winrt::fire_and_forget GenerateMockDataAsync(
             std::wstring tableName, std::wstring schema);
+
+        // ── EE Realtime Connection Monitor ─────────
+        // Mounts the WebView2-hosted monitor as a full-page overlay,
+        // mirroring EERowRelationshipDialog. Postgres-only entry — the
+        // sidebar button is hidden on other DB types.
+        void OpenConnectionMonitor();
 #endif
 
         // Shared progress state for dump/restore background jobs

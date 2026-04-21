@@ -204,6 +204,24 @@ namespace winrt::Gridex::implementation
         RenderTree();
     }
 
+    // Extension hook: reveals the "⚡" action button only when a host
+    // (e.g. EE WorkspacePage) has wired OnOpenConnectionMonitor. Invoked
+    // by SetItems / SetDatabaseType callers after they set the callback.
+    // The button click just forwards to the callback; host owns the flow.
+    void SidebarPanel::MonitorButton_Click(
+        winrt::Windows::Foundation::IInspectable const&,
+        mux::RoutedEventArgs const&)
+    {
+        if (OnOpenConnectionMonitor) OnOpenConnectionMonitor();
+    }
+
+    void SidebarPanel::SetMonitorButtonVisible(bool visible)
+    {
+        MonitorButton().Visibility(visible
+            ? mux::Visibility::Visible
+            : mux::Visibility::Collapsed);
+    }
+
     bool SidebarPanel::MatchesSearch(const DBModels::SidebarItem& item) const
     {
         if (searchQuery_.empty()) return true;

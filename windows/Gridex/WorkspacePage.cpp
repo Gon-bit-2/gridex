@@ -23,6 +23,7 @@
 #include "mock-data-generator/EEMockDataProgressDialog.h"
 #include "mock-data-generator/EEMockDataHeuristics.h"
 #include "mock-data-generator/EEMockDataGeneratorService.h"
+#include "connection-monitor/EEConnectionMonitorPage.h"
 #endif
 #include <winrt/Microsoft.UI.Xaml.Controls.h>
 #include <winrt/Microsoft.UI.Input.h>
@@ -852,6 +853,22 @@ namespace winrt::Gridex::implementation
             } else {
                 Sidebar().as<SidebarPanel>()->OnGenerateMockData = nullptr;
             }
+        }
+
+        // EE: sidebar header "⚡" → Realtime Connection Monitor. Postgres
+        // only for v1 (the feature depends on pg_stat_activity shape).
+        {
+            auto dbType = state_.connection.databaseType;
+            bool isPg = dbType == DBModels::DatabaseType::PostgreSQL;
+            auto sb = Sidebar().as<SidebarPanel>();
+            if (isPg) {
+                sb->OnOpenConnectionMonitor = [this]() {
+                    OpenConnectionMonitor();
+                };
+            } else {
+                sb->OnOpenConnectionMonitor = nullptr;
+            }
+            sb->SetMonitorButtonVisible(isPg);
         }
 #endif
 
@@ -4339,6 +4356,62 @@ g.er-selected > foreignObject > div.er-card{
                               state_.statusRenderTimeMs);
         UpdatePaginationUI();
     }
+
+#ifdef GRIDEX_ENTERPRISE
+    // Full-page overlay host for the Realtime Connection Monitor.
+    // Same snapshot-and-restore pattern as the row-relationship diagram
+    // so returning from the monitor drops the user back in their tab
+    // layout exactly as they left it.
+    void WorkspacePage::OpenConnectionMonitor()
+    {
+        if (!connMgr_.isConnected()) return;
+        auto adapter = connMgr_.getActiveAdapter();
+        if (!adapter) return;
+
+        auto projected = winrt::make<
+            winrt::Gridex::implementation::EEConnectionMonitorPage>();
+        auto impl = winrt::get_self<
+            winrt::Gridex::implementation::EEConnectionMonitorPage>(projected);
+        impl->SetAdapter(adapter.get());
+
+        auto contentArea = ContentArea();
+
+        struct LayoutSnapshot
+        {
+            std::vector<std::pair<mux::UIElement, mux::Visibility>> children;
+            double sidebarWidth = 0;
+            double detailsWidth = 0;
+            mux::Visibility tabBarVis = mux::Visibility::Visible;
+        };
+        auto snapshot = std::make_shared<LayoutSnapshot>();
+        for (auto const& child : contentArea.Children()) {
+            if (auto fe = child.try_as<mux::UIElement>())
+                snapshot->children.push_back({ fe, fe.Visibility() });
+        }
+        snapshot->sidebarWidth = SidebarColumn().Width().Value;
+        snapshot->detailsWidth = DetailsColumn().Width().Value;
+        snapshot->tabBarVis = TabBar().Visibility();
+
+        for (auto& [child, _] : snapshot->children)
+            child.Visibility(mux::Visibility::Collapsed);
+        DetailsColumn().Width(mux::GridLengthHelper::FromPixels(0));
+        TabBar().Visibility(mux::Visibility::Collapsed);
+
+        impl->OnCloseRequested = [this, snapshot, projected]() {
+            auto ca = ContentArea();
+            uint32_t idx = 0;
+            if (ca.Children().IndexOf(projected, idx))
+                ca.Children().RemoveAt(idx);
+            for (auto& [child, vis] : snapshot->children)
+                child.Visibility(vis);
+            DetailsColumn().Width(mux::GridLengthHelper::FromPixels(
+                snapshot->detailsWidth > 0 ? snapshot->detailsWidth : 260));
+            TabBar().Visibility(snapshot->tabBarVis);
+        };
+
+        contentArea.Children().Append(projected);
+    }
+#endif
 
 #ifdef GRIDEX_ENTERPRISE
     // ── EE: Mock Data Generator orchestration ─────────────────
