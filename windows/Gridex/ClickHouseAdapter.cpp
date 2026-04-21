@@ -525,6 +525,11 @@ namespace DBModels
     // For user-defined functions (CREATE FUNCTION ...), system.functions
     // stores the full DDL in `create_query`. Built-ins have no source
     // exposed — callers get an empty string and should render a stub.
+    //
+    // The raw create_query is `CREATE FUNCTION name AS ...` which errors
+    // with FUNCTION_ALREADY_EXISTS if the user tweaks + re-runs it.
+    // Rewrite to `CREATE OR REPLACE FUNCTION` so Run is idempotent and
+    // doubles as a cheap edit flow.
     std::wstring ClickHouseAdapter::getFunctionSource(
         const std::wstring& name, const std::wstring& /*schema*/)
     {
@@ -534,7 +539,13 @@ namespace DBModels
             "WHERE name = " + quoteLiteral(name) + " LIMIT 1");
         if (result.rows.empty()) return L"";
         auto it = result.rows[0].find(L"create_query");
-        return (it != result.rows[0].end()) ? it->second : L"";
+        if (it == result.rows[0].end()) return L"";
+
+        std::wstring src = it->second;
+        const std::wstring prefix = L"CREATE FUNCTION ";
+        if (src.rfind(prefix, 0) == 0)
+            src = L"CREATE OR REPLACE FUNCTION " + src.substr(prefix.size());
+        return src;
     }
 
     std::wstring ClickHouseAdapter::getCreateTableSQL(
