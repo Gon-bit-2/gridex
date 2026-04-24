@@ -25,6 +25,7 @@
 #include "mock-data-generator/EEMockDataHeuristics.h"
 #include "mock-data-generator/EEMockDataGeneratorService.h"
 #include "connection-monitor/EEConnectionMonitorPage.h"
+#include "visual-query-builder/EEVQBPage.h"
 #endif
 #include <winrt/Microsoft.UI.Xaml.Controls.h>
 #include <winrt/Microsoft.UI.Input.h>
@@ -876,6 +877,21 @@ namespace winrt::Gridex::implementation
                 sb->OnOpenConnectionMonitor = nullptr;
             }
             sb->SetMonitorButtonVisible(isPg);
+        }
+
+        // EE: sidebar header 2nd button → Visual Query Builder. PG + MySQL.
+        {
+            auto dbType = state_.connection.databaseType;
+            bool isSql =
+                dbType == DBModels::DatabaseType::PostgreSQL ||
+                dbType == DBModels::DatabaseType::MySQL;
+            auto sb = Sidebar().as<SidebarPanel>();
+            if (isSql) {
+                sb->OnOpenQueryBuilder = [this]() { OpenVisualQueryBuilder(); };
+            } else {
+                sb->OnOpenQueryBuilder = nullptr;
+            }
+            sb->SetQueryBuilderButtonVisible(isSql);
         }
 #endif
 
@@ -4518,6 +4534,68 @@ g.er-selected > foreignObject > div.er-card{
             DetailsColumn().Width(mux::GridLengthHelper::FromPixels(
                 snapshot->detailsWidth > 0 ? snapshot->detailsWidth : 260));
             TabBar().Visibility(snapshot->tabBarVis);
+        };
+
+        contentArea.Children().Append(projected);
+    }
+
+    // Visual Query Builder overlay — same snapshot-restore choreography
+    // as the connection monitor. "Open in SQL editor" callback from JS
+    // spawns a fresh query tab pre-filled with the generated SQL.
+    void WorkspacePage::OpenVisualQueryBuilder()
+    {
+        if (!connMgr_.isConnected()) return;
+        auto adapter = connMgr_.getActiveAdapter();
+        if (!adapter) return;
+
+        auto projected = winrt::make<
+            winrt::Gridex::implementation::EEVQBPage>();
+        auto impl = winrt::get_self<
+            winrt::Gridex::implementation::EEVQBPage>(projected);
+        impl->SetAdapter(adapter.get(), currentSchema_, state_.connection.databaseType);
+
+        auto contentArea = ContentArea();
+        struct LayoutSnapshot {
+            std::vector<std::pair<mux::UIElement, mux::Visibility>> children;
+            double sidebarWidth = 0; double detailsWidth = 0;
+            mux::Visibility tabBarVis = mux::Visibility::Visible;
+        };
+        auto snapshot = std::make_shared<LayoutSnapshot>();
+        for (auto const& child : contentArea.Children()) {
+            if (auto fe = child.try_as<mux::UIElement>())
+                snapshot->children.push_back({ fe, fe.Visibility() });
+        }
+        snapshot->sidebarWidth = SidebarColumn().Width().Value;
+        snapshot->detailsWidth = DetailsColumn().Width().Value;
+        snapshot->tabBarVis = TabBar().Visibility();
+
+        for (auto& [child, _] : snapshot->children)
+            child.Visibility(mux::Visibility::Collapsed);
+        DetailsColumn().Width(mux::GridLengthHelper::FromPixels(0));
+        TabBar().Visibility(mux::Visibility::Collapsed);
+
+        auto restore = [this, snapshot, projected]() {
+            auto ca = ContentArea();
+            uint32_t idx = 0;
+            if (ca.Children().IndexOf(projected, idx))
+                ca.Children().RemoveAt(idx);
+            for (auto& [child, vis] : snapshot->children)
+                child.Visibility(vis);
+            DetailsColumn().Width(mux::GridLengthHelper::FromPixels(
+                snapshot->detailsWidth > 0 ? snapshot->detailsWidth : 260));
+            TabBar().Visibility(snapshot->tabBarVis);
+        };
+
+        impl->OnCloseRequested = restore;
+
+        impl->OnOpenInEditorRequested = [this, restore](std::wstring sql) {
+            // Drop the overlay + open a fresh SQL tab pre-filled with
+            // the generated query. SetSql fires after the tab switch so
+            // the QueryEditorView is bound to the new tab id.
+            restore();
+            OpenNewQueryTab();
+            try { QueryEditor().as<QueryEditorView>()->SetSql(sql); }
+            catch (...) {}
         };
 
         contentArea.Children().Append(projected);

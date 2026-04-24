@@ -57,6 +57,13 @@ namespace winrt::Gridex::implementation
         std::function<void()> OnOpenConnectionMonitor;
         void SetMonitorButtonVisible(bool visible);
 
+        // Extension hook: second header slot for the EE Visual Query
+        // Builder. Paired with SetQueryBuilderButtonVisible(true) by
+        // the host once a supported (Postgres / MySQL) connection is
+        // active. Independent of the monitor callback.
+        std::function<void()> OnOpenQueryBuilder;
+        void SetQueryBuilderButtonVisible(bool visible);
+
         // Callback for "Show ER Diagram" on a Database/Schema group
         std::function<void(const std::wstring& schema)> OnShowERDiagram;
 
@@ -97,6 +104,9 @@ namespace winrt::Gridex::implementation
             winrt::Windows::Foundation::IInspectable const& sender,
             winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e);
         void MonitorButton_Click(
+            winrt::Windows::Foundation::IInspectable const& sender,
+            winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e);
+        void QueryBuilderButton_Click(
             winrt::Windows::Foundation::IInspectable const& sender,
             winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e);
 

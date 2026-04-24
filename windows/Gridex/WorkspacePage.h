@@ -192,6 +192,11 @@ namespace winrt::Gridex::implementation
         // mirroring EERowRelationshipDialog. Postgres-only entry — the
         // sidebar button is hidden on other DB types.
         void OpenConnectionMonitor();
+
+        // ── EE Visual Query Builder ────────────────
+        // WebView2 overlay hosting a drag-drop query canvas. Same
+        // mount pattern as the monitor. Postgres + MySQL only.
+        void OpenVisualQueryBuilder();
 #endif
 
         // Shared progress state for dump/restore background jobs
