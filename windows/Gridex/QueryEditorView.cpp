@@ -4,6 +4,7 @@
 #include <winrt/Windows.UI.Core.h>
 #include <winrt/Windows.System.h>
 #include <winrt/Microsoft.UI.Input.h>
+#include <winrt/Microsoft.UI.Dispatching.h>
 #include "QueryEditorView.h"
 #if __has_include("QueryEditorView.g.cpp")
 #include "QueryEditorView.g.cpp"
@@ -746,13 +747,27 @@ namespace winrt::Gridex::implementation
     }
 
     // ── Result-grid rows (header-independent, rebuilt on resize end) ──
-    void QueryEditorView::BuildResultRows(const DBModels::QueryResult& result)
-    {
-        // Remove any existing row StackPanels but keep the header (index 0).
-        auto children = ResultsContainer().Children();
-        while (children.Size() > 1) children.RemoveAt(1);
+    namespace {
+        // UI-thread resumer (WinAppSDK ships no resume_foreground for
+        // Microsoft.UI.Dispatching.DispatcherQueue, so this is the
+        // equivalent custom awaiter).
+        struct ResumeOnDispatcher
+        {
+            winrt::Microsoft::UI::Dispatching::DispatcherQueue dq;
+            bool await_ready() const noexcept { return false; }
+            void await_suspend(std::coroutine_handle<> h) const
+            {
+                dq.TryEnqueue([h] { h.resume(); });
+            }
+            void await_resume() const noexcept {}
+        };
 
-        for (int i = 0; i < static_cast<int>(result.rows.size()); ++i)
+        // Build a single result-row StackPanel. Pulled out so the
+        // chunked tail can call it without duplicating the cell layout.
+        muxc::StackPanel BuildResultRow(
+            const DBModels::QueryResult& result, int i,
+            const std::vector<double>& colWidths,
+            double defaultWidth)
         {
             auto& row = result.rows[i];
             muxc::StackPanel rowPanel;
@@ -764,8 +779,8 @@ namespace winrt::Gridex::implementation
             for (size_t ci = 0; ci < result.columnNames.size(); ++ci)
             {
                 const auto& col = result.columnNames[ci];
-                const double w = (ci < resultColumnWidths_.size())
-                    ? resultColumnWidths_[ci] : RESULT_COL_DEFAULT_WIDTH;
+                const double w = (ci < colWidths.size())
+                    ? colWidths[ci] : defaultWidth;
 
                 std::wstring val;
                 auto it = row.find(col);
@@ -788,8 +803,62 @@ namespace winrt::Gridex::implementation
                 cell.Child(lbl);
                 rowPanel.Children().Append(cell);
             }
-            ResultsContainer().Children().Append(rowPanel);
+            return rowPanel;
         }
+    }
+
+    // Chunked render: synchronous first chunk for instant first paint,
+    // then a coroutine streams the rest in 100-row batches yielding
+    // ~1 frame between chunks. Mirrors DataGridView's tail pattern.
+    void QueryEditorView::BuildResultRows(const DBModels::QueryResult& result)
+    {
+        // Remove any existing row StackPanels but keep the header (index 0).
+        auto children = ResultsContainer().Children();
+        while (children.Size() > 1) children.RemoveAt(1);
+
+        const int totalRows = static_cast<int>(result.rows.size());
+        constexpr int kFirstChunk = 100;
+        int firstEnd = (totalRows < kFirstChunk) ? totalRows : kFirstChunk;
+
+        for (int i = 0; i < firstEnd; ++i)
+            ResultsContainer().Children().Append(
+                BuildResultRow(result, i, resultColumnWidths_, RESULT_COL_DEFAULT_WIDTH));
+
+        if (firstEnd >= totalRows) return;
+
+        // New generation cancels any in-flight tail from a previous run.
+        const uint64_t gen = ++buildResultGeneration_;
+        BuildResultRowsTail(result, gen, firstEnd);
+    }
+
+    winrt::fire_and_forget QueryEditorView::BuildResultRowsTail(
+        DBModels::QueryResult result, uint64_t gen, int startIdx)
+    {
+        constexpr int kChunk = 100;
+        const int totalRows = static_cast<int>(result.rows.size());
+        auto self = get_strong();
+        auto dq = winrt::Microsoft::UI::Dispatching::DispatcherQueue::GetForCurrentThread();
+
+        try
+        {
+            for (int i = startIdx; i < totalRows; i += kChunk)
+            {
+                if (self->buildResultGeneration_ != gen) co_return; // superseded
+                int end = (totalRows < i + kChunk) ? totalRows : i + kChunk;
+                auto container = self->ResultsContainer();
+                if (!container) co_return;
+                for (int j = i; j < end; ++j)
+                    container.Children().Append(
+                        BuildResultRow(result, j,
+                                       self->resultColumnWidths_,
+                                       RESULT_COL_DEFAULT_WIDTH));
+                if (end >= totalRows) break;
+                co_await winrt::resume_after(std::chrono::milliseconds(16));
+                if (!dq) co_return;
+                co_await ResumeOnDispatcher{ dq };
+            }
+        }
+        catch (...) { /* page closed mid-stream — drop quietly */ }
     }
 
     void QueryEditorView::ShowError(const std::wstring& message)
