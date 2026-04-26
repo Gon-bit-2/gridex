@@ -116,6 +116,25 @@ namespace winrt::Gridex::implementation
         // (CREATE FUNCTION DDL or body) fetched via
         // DatabaseAdapter::getFunctionSource.
         void ShowFunctionSource(const std::wstring& name, const std::wstring& schema);
+        // Inspect a failed query's error text for the typical
+        // "syntax error at or near 'X'" pattern. If X is a known
+        // reserved keyword for the active dialect AND it appears
+        // unquoted in the SQL, return a short user-facing hint
+        // suggesting the right quote char. Empty string = no hint.
+        static std::wstring ReservedKeywordHint(
+            const std::wstring& sql,
+            const std::wstring& error,
+            DBModels::DatabaseType dbType);
+        // Scan SQL for reserved keywords appearing in unambiguous
+        // identifier positions (after FROM / JOIN / INTO / UPDATE /
+        // TABLE) and wrap them with the dialect's quote char so
+        // queries like `select id from order` execute without forcing
+        // the user to remember the quoting rules. Returns the rewritten
+        // SQL and sets `wasRewritten` if anything changed.
+        static std::wstring AutoQuoteReservedIdentifiers(
+            const std::wstring& sql,
+            DBModels::DatabaseType dbType,
+            bool& wasRewritten);
 
         // ── CRUD Operations ─────────────────────────
         void DeleteSelectedRow();
