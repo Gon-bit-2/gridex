@@ -65,7 +65,7 @@ namespace winrt::Gridex::implementation
         static constexpr double RESULT_COL_DEFAULT_WIDTH = 150.0;
 
         void EnsureEditorCreated();
-        void ExecuteCurrentQuery();
+        winrt::fire_and_forget ExecuteCurrentQuery();
         void ShowResult(const DBModels::QueryResult& result);
         void ShowError(const std::wstring& message);
         void BuildResultHeaders(const DBModels::QueryResult& result);
