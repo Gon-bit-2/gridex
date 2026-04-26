@@ -622,13 +622,16 @@ namespace winrt::Gridex::implementation
         // Chunked render to keep the UI thread responsive on large
         // result sets. Building 3k+ row visuals in one synchronous
         // pass froze the app for 5+ seconds — measurable in the
-        // wild on `SELECT * FROM big_table`. Tradeoff: the first
-        // chunk (kFirstChunk) is rendered synchronously so the user
-        // sees the top of the table immediately; remaining rows are
-        // posted back to the dispatcher queue in batches of kChunk
-        // so input + scroll get a chance to run between batches.
-        constexpr int kFirstChunk = 200;
-        constexpr int kChunk      = 200;
+        // wild on `SELECT * FROM big_table`.
+        //
+        // Why a DispatcherQueueTimer (and not just TryEnqueue):
+        // chained TryEnqueue posts drain back-to-back without
+        // letting layout / paint pump in between, so the user
+        // sees a long freeze and then all rows appear at once.
+        // A timer with a small interval forces a real frame gap
+        // between chunks — input + paint get scheduled naturally.
+        constexpr int kFirstChunk = 100;  // small first paint
+        constexpr int kChunk      = 100;  // per-tick budget
 
         int firstEnd = (std::min)(totalRows, kFirstChunk);
         for (int i = 0; i < firstEnd; ++i)
@@ -645,7 +648,7 @@ namespace winrt::Gridex::implementation
 
         // New generation token. If another SetData fires before this
         // chain finishes, the captured `gen` will mismatch and the
-        // continuation drops out without appending stale rows.
+        // tick drops out without appending stale rows.
         const uint64_t gen = ++buildRowsGeneration_;
         auto self = get_strong();
         auto dq = winrt::Microsoft::UI::Dispatching::DispatcherQueue::GetForCurrentThread();
@@ -658,28 +661,25 @@ namespace winrt::Gridex::implementation
             return;
         }
 
-        // shared_ptr<function> so the lambda can re-post itself
-        // without the dangling-reference traps of capturing a
-        // std::function by reference.
         auto cursor = std::make_shared<int>(firstEnd);
-        auto step   = std::make_shared<std::function<void()>>();
-        *step = [self, dq, cursor, step, gen, totalRows]() mutable
+        auto timer  = dq.CreateTimer();
+        timer.Interval(std::chrono::milliseconds(16)); // ~1 frame
+        timer.IsRepeating(true);
+        timer.Tick([self, timer, cursor, gen, totalRows]
+                   (auto&&, auto&&)
         {
-            if (self->buildRowsGeneration_ != gen) return;       // superseded
+            if (self->buildRowsGeneration_ != gen) { timer.Stop(); return; }
             int start = *cursor;
             int end   = (std::min)(totalRows, start + kChunk);
             auto rows = self->DataRows();
             for (int i = start; i < end; ++i)
                 rows.Children().Append(self->BuildRowElement(i));
-            // Re-apply selection if it lands in the chunk we just
-            // realized.
             if (self->selectedRow_ >= start && self->selectedRow_ < end)
                 self->HighlightRow(self->selectedRow_);
             *cursor = end;
-            if (end < totalRows)
-                dq.TryEnqueue([step]() { (*step)(); });
-        };
-        dq.TryEnqueue([step]() { (*step)(); });
+            if (end >= totalRows) timer.Stop();
+        });
+        timer.Start();
     }
 
     // Build a single row's UI element. Layout: a horizontal StackPanel that
