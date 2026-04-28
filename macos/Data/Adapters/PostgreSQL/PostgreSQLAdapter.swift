@@ -269,14 +269,19 @@ final class PostgreSQLAdapter: DatabaseAdapter, SchemaInspectable, @unchecked Se
 
     func listTables(schema: String?) async throws -> [TableInfo] {
         let schemaFilter = schema ?? "public"
+        // relkind 'r' = ordinary table, 'p' = partitioned table parent.
+        // `NOT relispartition` excludes partition children — they show up as
+        // ordinary 'r' rows but the parent already represents them in the UI;
+        // including them would double-count rows (regression vs the original
+        // information_schema query, which only returned 'BASE TABLE' parents).
         let result = try await executeParameterized(sql: """
-            SELECT t.table_name,
-                   (SELECT reltuples::bigint FROM pg_class c
-                    JOIN pg_namespace n ON n.oid = c.relnamespace
-                    WHERE c.relname = t.table_name AND n.nspname = $1)
-            FROM information_schema.tables t
-            WHERE t.table_schema = $1 AND t.table_type = 'BASE TABLE'
-            ORDER BY t.table_name
+            SELECT c.relname, NULLIF(c.reltuples::bigint, -1)
+            FROM pg_class c
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE n.nspname = $1
+              AND c.relkind IN ('r', 'p')
+              AND NOT c.relispartition
+            ORDER BY c.relname
             """, params: [schemaFilter])
         return result.rows.compactMap { row -> TableInfo? in
             guard let name = row.first?.stringValue else { return nil }
