@@ -104,7 +104,13 @@ enum ProviderType: String, Codable, Sendable, CaseIterable, Identifiable {
         case .anthropic:         return "claude-sonnet-4-6"
         case .gemini:            return "gemini-2.5-flash"
         case .ollama:            return "llama3"
-        case .chatGPT:           return "gpt-5.4"
+        // ChatGPT model slugs are owned by `/backend-api/codex/models`. The
+        // authoritative list comes from the live fetch after sign-in;
+        // `gpt-5-codex` is Codex CLI's own default and the safest known-real
+        // slug to use as a stop-gap until the live `/models` call resolves.
+        // (Earlier value `gpt-5.4` was invented and produced HTTP 400 on
+        // first request before the picker had a chance to update.)
+        case .chatGPT:           return "gpt-5-codex"
         case .openAI:            return "gpt-4o"
         case .azureOpenAI:       return "gpt-4o"
         case .groq:              return "llama-3.3-70b-versatile"

@@ -32,7 +32,11 @@ enum ProviderFactory {
             return OllamaProvider(baseURLString: base)
         case .chatGPT:
             guard let svc = chatGPTOAuthService else {
-                preconditionFailure("ChatGPT provider requires chatGPTOAuthService")
+                // Surface as a normal LLMService error rather than crashing —
+                // misconfiguration in a future caller (e.g. the legacy
+                // type-only `make(type:apiKey:baseURL:)`) becomes a clean
+                // GridexError on first use instead of a process crash.
+                return MisconfiguredChatGPTProvider()
             }
             return ChatGPTProvider(providerId: config.id, baseURL: base, oauthService: svc)
         case .openAI, .azureOpenAI, .groq, .deepseek, .mistral, .xAI,
@@ -52,5 +56,39 @@ enum ProviderFactory {
             model: type.defaultModel
         )
         return make(config: config, apiKey: apiKey)
+    }
+}
+
+/// Stand-in returned when `make(...)` is asked for a `.chatGPT` provider but
+/// the caller didn't thread the OAuth service through. Every method throws
+/// `GridexError.aiProviderError`, so the misconfiguration surfaces as a normal
+/// in-band error on the first request rather than a process-wide crash.
+private struct MisconfiguredChatGPTProvider: LLMService {
+    let providerName = "ChatGPT (misconfigured)"
+
+    func stream(
+        messages: [LLMMessage],
+        systemPrompt: String,
+        model: String,
+        maxTokens: Int,
+        temperature: Double
+    ) -> AsyncThrowingStream<String, Error> {
+        AsyncThrowingStream { continuation in
+            continuation.finish(throwing: GridexError.aiProviderError(
+                "ChatGPT provider misconfigured — OAuth service was not supplied to ProviderFactory."
+            ))
+        }
+    }
+
+    func availableModels() async throws -> [LLMModel] {
+        throw GridexError.aiProviderError(
+            "ChatGPT provider misconfigured — OAuth service was not supplied to ProviderFactory."
+        )
+    }
+
+    func validateAPIKey() async throws -> Bool {
+        throw GridexError.aiProviderError(
+            "ChatGPT provider misconfigured — OAuth service was not supplied to ProviderFactory."
+        )
     }
 }

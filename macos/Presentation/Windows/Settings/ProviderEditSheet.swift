@@ -353,6 +353,16 @@ struct ProviderEditSheet: View {
             Task { await refreshChatGPTStatus() }
             return
         }
+        // Switching OUT of .chatGPT mid-flow: cancel any in-flight OAuth task so
+        // a tardy callback doesn't write tokens to the keychain after the form
+        // has already moved on, and reset the ChatGPT-side UI state so a later
+        // switch back to .chatGPT starts clean.
+        chatGPTSignInTask?.cancel()
+        chatGPTSignInTask = nil
+        isSigningIn       = false
+        signInError       = nil
+        chatGPTStatus     = .signedOut
+
         apiBase         = newType.defaultBaseURL
         model           = ""          // user must fetch or type — avoids presetting a model the endpoint may not support
         availableModels = []
