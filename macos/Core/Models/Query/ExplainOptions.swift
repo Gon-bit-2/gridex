@@ -91,6 +91,26 @@ struct ExplainOptions: Equatable, Codable, Sendable {
     /// Matches the legacy hard-coded `EXPLAIN (ANALYZE false, COSTS true, FORMAT TEXT)`
     /// — used when callers don't pass options.
     static let `default` = ExplainOptions()
+
+    /// "Profile" preset — what a senior dev would tick before debugging a slow
+    /// SELECT: actual times, buffer hits/reads, schema-qualified output, plus
+    /// the planning/execution summary. Does NOT change FORMAT — caller keeps
+    /// whatever they already set so JSON-tree users don't get downgraded to
+    /// TEXT after applying the preset.
+    ///
+    /// **Caution**: enabling ANALYZE means the query is actually executed.
+    /// Safe for SELECT, dangerous for INSERT/UPDATE/DELETE (will modify data).
+    /// The UI surfaces this preset as "Profile (SELECT)" to make the
+    /// expectation explicit.
+    static func profilePreset(currentFormat: Format) -> ExplainOptions {
+        var opts = ExplainOptions.default
+        opts.analyze = true
+        opts.buffers = true
+        opts.verbose = true
+        opts.summary = true
+        opts.format  = currentFormat
+        return opts
+    }
 }
 
 // MARK: - Cross-disable rules

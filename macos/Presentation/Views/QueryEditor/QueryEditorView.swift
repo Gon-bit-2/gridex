@@ -33,6 +33,7 @@ struct QueryEditorView: View {
     /// browser instead of the data grid. Cleared by every regular Run.
     @State private var explainOutput: String?
     @State private var explainOutputFormat: ExplainOptions.Format = .text
+    @State private var explainOutputAnalyzed: Bool = false
 
     private var isRedis: Bool { appState.activeConfig?.databaseType == .redis }
     private var isPostgres: Bool { appState.activeConfig?.databaseType == .postgresql }
@@ -162,7 +163,11 @@ struct QueryEditorView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .padding()
                 } else if let output = explainOutput {
-                    ExplainOutputView(raw: output, format: explainOutputFormat)
+                    ExplainOutputView(
+                        raw: output,
+                        format: explainOutputFormat,
+                        analyzed: explainOutputAnalyzed
+                    )
                 } else if !resultViewModel.columns.isEmpty {
                     AppKitDataGrid(
                         viewModel: resultViewModel,
@@ -444,6 +449,7 @@ struct QueryEditorView: View {
                     .joined(separator: "\n")
                 explainOutput = raw
                 explainOutputFormat = isPostgres ? optsForBuild.format : .text
+                explainOutputAnalyzed = isPostgres ? optsForBuild.analyze : false
                 resultViewModel.columns = []  // hide grid; show explain panel
                 resultViewModel.rows = []
                 resultRowCount = 0

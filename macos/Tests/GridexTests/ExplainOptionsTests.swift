@@ -198,6 +198,50 @@ final class ExplainOptionsTests: XCTestCase {
         XCTAssertEqual(restored, opts)
     }
 
+    // MARK: - Profile preset
+
+    func test_profilePreset_setsTheRightFourFlags() {
+        let preset = ExplainOptions.profilePreset(currentFormat: .text)
+        XCTAssertTrue(preset.analyze, "ANALYZE — actual times require it")
+        XCTAssertTrue(preset.buffers, "BUFFERS — cache hit/read stats")
+        XCTAssertTrue(preset.verbose, "VERBOSE — schema-qualified output")
+        XCTAssertTrue(preset.summary, "SUMMARY — planning + execution time")
+    }
+
+    func test_profilePreset_doesNotSetUnrelatedFlags() {
+        // Memory / Generic Plan / Settings / Timing / WAL / Serialize are
+        // problem-specific. Default preset must not over-commit — leaves
+        // them off so the user can layer them in if needed.
+        let preset = ExplainOptions.profilePreset(currentFormat: .text)
+        XCTAssertFalse(preset.memory)
+        XCTAssertFalse(preset.genericPlan)
+        XCTAssertFalse(preset.settings)
+        XCTAssertFalse(preset.timing)
+        XCTAssertFalse(preset.wal)
+        XCTAssertEqual(preset.serialize, .off)
+    }
+
+    func test_profilePreset_keepsCurrentFormat() {
+        // User on Tree view (FORMAT JSON) clicking the preset must NOT get
+        // bumped back to TEXT — that would silently switch their view mode.
+        for format in ExplainOptions.Format.allCases {
+            let preset = ExplainOptions.profilePreset(currentFormat: format)
+            XCTAssertEqual(preset.format, format,
+                "preset must preserve user's chosen format \(format)")
+        }
+    }
+
+    func test_profilePreset_buildsValidPGOptionList() {
+        // Sanity: the preset must produce a valid `EXPLAIN (...)` shape that
+        // includes ANALYZE true / BUFFERS true / VERBOSE true / SUMMARY true.
+        let preset = ExplainOptions.profilePreset(currentFormat: .json)
+        let sql = DatabaseType.postgresql.explainSQL(for: "SELECT 1", options: preset)!
+        for piece in ["ANALYZE true", "BUFFERS true", "VERBOSE true",
+                      "SUMMARY true", "FORMAT JSON"] {
+            XCTAssertTrue(sql.contains(piece), "preset SQL missing '\(piece)': \(sql)")
+        }
+    }
+
     // MARK: - PG version banner parsing
 
     func test_parsePostgresMajor_examples() {

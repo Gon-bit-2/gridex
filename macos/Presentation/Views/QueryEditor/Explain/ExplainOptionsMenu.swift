@@ -20,6 +20,17 @@ struct ExplainOptionsMenu: View {
 
     var body: some View {
         Menu {
+            // Quick preset — sets the four options a senior dev would tick
+            // before debugging a slow SELECT (Analyze, Buffers, Verbose,
+            // Summary). Keeps current Format so users on Tree view don't get
+            // bumped back to Text. The "(SELECT)" suffix is a load-bearing
+            // hint that this turns on ANALYZE → query is actually executed.
+            Button("Apply ‘Profile’ preset (SELECT)") {
+                options = ExplainOptions.profilePreset(currentFormat: options.format)
+            }
+
+            Divider()
+
             // ANALYZE — toggle prominently at the top. It's the load-bearing
             // setting (off = plan only / safe; on = execute query / measure).
             Toggle("Analyze (execute query)", isOn: $options.analyze)

@@ -44,12 +44,19 @@ struct ExplainOutputView: View {
     /// to gate the Tree view (only meaningful for JSON/YAML output).
     let format: ExplainOptions.Format
 
+    /// Whether the EXPLAIN was run with ANALYZE on. Drives the inline hint
+    /// banner below — without ANALYZE the user only sees plan estimates, not
+    /// actual times / row counts / buffer stats, which is rarely enough to
+    /// debug a real performance issue.
+    let analyzed: Bool
+
     @State private var mode: ExplainViewMode
     @State private var wordWrap: Bool = true
 
-    init(raw: String, format: ExplainOptions.Format) {
+    init(raw: String, format: ExplainOptions.Format, analyzed: Bool) {
         self.raw = raw
         self.format = format
+        self.analyzed = analyzed
         // Auto-pick: if the user asked for JSON, default to Tree (most useful).
         // Otherwise default to Text.
         let initial: ExplainViewMode = (format == .json) ? .tree : .text
@@ -67,8 +74,30 @@ struct ExplainOutputView: View {
         VStack(spacing: 0) {
             header
             Divider()
+            if !analyzed {
+                analyzeHint
+                Divider()
+            }
             content
         }
+    }
+
+    /// Inline tip surfaced when ANALYZE is off. Most user-facing perf debug
+    /// requires actual times / row counts / cache stats — this nudges the
+    /// user toward the right toggles without forcing them.
+    private var analyzeHint: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Image(systemName: "lightbulb")
+                .font(.system(size: 11))
+                .foregroundStyle(.yellow)
+            Text("Tip: enable **Analyze** + **Buffers** in the options menu to see actual times and cache stats. The current output is plan estimates only.")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
     }
 
     // MARK: - Header
