@@ -90,6 +90,7 @@
                                 <ComboBoxItem Content="OpenRouter" />
                                 <ComboBoxItem Content="OpenAI (Sign in)" />
                                 <ComboBoxItem Content="Requesty" />
+                                <ComboBoxItem Content="Opper" />
                             </ComboBox>
                         </StackPanel>
 
