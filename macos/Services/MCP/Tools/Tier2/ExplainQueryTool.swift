@@ -19,7 +19,7 @@ struct ExplainQueryTool: MCPTool {
             ],
             "sql": [
                 "type": "string",
-                "description": "SQL query to explain"
+                "description": "SQL query to explain. Required unless 'query' is provided"
             ],
             "query": [
                 "type": "string",

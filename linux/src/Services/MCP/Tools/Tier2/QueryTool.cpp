@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <chrono>
 
+#include "Services/MCP/Security/SQLSanitizer.h"
 #include "Services/MCP/Tools/MCPTool.h"
 #include "Services/MCP/Tools/ToolHelpers.h"
 
@@ -22,7 +23,7 @@ public:
             {"type", "object"},
             {"properties", {
                 {"connection_id", {{"type", "string"}, {"description", "Connection identifier"}}},
-                {"sql",           {{"type", "string"}, {"description", "SQL query"}}},
+                {"sql",           {{"type", "string"}, {"description", "SQL query. Required unless 'query' is provided"}}},
                 {"query",         {{"type", "string"}, {"description", "SQL query (alias for 'sql')"}}},
                 {"params",        {{"type", "array"},  {"description", "Parameters for placeholders"}}},
                 {"row_limit",     {{"type", "integer"},
@@ -63,13 +64,18 @@ public:
 
         auto [adapter, config] = ctx.getAdapter(connectionId);
 
+        // Only SELECT / WITH get an auto LIMIT (SHOW / DESCRIBE / PRAGMA would
+        // break). Classify on the comment/literal-stripped text so a leading
+        // comment or "(" doesn't skip the limit.
         std::string finalSql = sql;
-        std::string trimmed = trimSpaces(sql);
-        std::string upper = toUpperAscii(trimmed);
+        std::string code = trimSpaces(stripCommentsAndStrings(sql));
+        auto codeStart = code.find_first_not_of("( \t\r\n");
+        std::string upper = toUpperAscii(codeStart == std::string::npos ? "" : code.substr(codeStart));
         bool isSelectOrWith = (upper.rfind("SELECT", 0) == 0 || upper.rfind("WITH", 0) == 0);
         if (isSelectOrWith && upper.find("LIMIT") == std::string::npos && isSQL(config.databaseType)) {
-            while (!trimmed.empty() && trimmed.back() == ';') trimmed.pop_back();
-            finalSql = trimSpaces(trimmed) + " LIMIT " + std::to_string(rowLimit);
+            std::string trimmed = trimSpaces(sql);
+            while (!trimmed.empty() && trimmed.back() == ';') trimmed = trimSpaces(trimmed.substr(0, trimmed.size() - 1));
+            finalSql = trimmed + " LIMIT " + std::to_string(rowLimit);
         }
 
         std::vector<RowValue> queryParams;

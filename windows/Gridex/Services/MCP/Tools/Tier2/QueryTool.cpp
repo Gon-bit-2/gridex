@@ -4,6 +4,7 @@
 
 #include "QueryTool.h"
 #include "../MCPToolHelpers.h"
+#include "../../Security/MCPSQLSanitizer.h"
 #include <algorithm>
 
 namespace DBModels
@@ -57,17 +58,18 @@ namespace DBModels
         std::wstring sqlW = MCPToolHelpers::fromUtf8(sqlUtf8);
         if (acceptsLimitSuffix(config.databaseType))
         {
-            std::wstring trimmed = sqlW;
-            size_t startPos = trimmed.find_first_not_of(L" \t\r\n");
-            if (startPos != std::wstring::npos)
-                trimmed = trimmed.substr(startPos);
-
-            std::wstring upper = trimmed;
+            // Classify on the comment/literal-stripped text so a leading
+            // comment or "(" doesn't skip the limit.
+            std::wstring upper = MCPToolHelpers::fromUtf8(
+                MCPSQLSanitizer::stripCommentsAndStrings(sqlUtf8));
+            size_t startPos = upper.find_first_not_of(L"( \t\r\n");
+            upper = (startPos == std::wstring::npos) ? L"" : upper.substr(startPos);
             std::transform(upper.begin(), upper.end(), upper.begin(), ::towupper);
 
             bool isSelectOrWith = (upper.rfind(L"SELECT", 0) == 0 || upper.rfind(L"WITH", 0) == 0);
             if (isSelectOrWith && upper.find(L"LIMIT") == std::wstring::npos)
             {
+                std::wstring trimmed = sqlW;
                 while (!trimmed.empty() && (trimmed.back() == L' ' ||
                         trimmed.back() == L';' || trimmed.back() == L'\n' || trimmed.back() == L'\r' || trimmed.back() == L'\t'))
                     trimmed.pop_back();

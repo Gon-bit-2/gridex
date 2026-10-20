@@ -28,7 +28,7 @@ namespace DBModels
                 {"type", "object"},
                 {"properties", {
                     {"connection_id", {{"type", "string"}, {"description", "Connection identifier"}}},
-                    {"sql",           {{"type", "string"}, {"description", "SQL query to execute"}}},
+                    {"sql",           {{"type", "string"}, {"description", "SQL query to execute. Required unless 'query' is provided"}}},
                     {"query",         {{"type", "string"}, {"description", "SQL query to execute (alias for 'sql')"}}},
                     {"row_limit",     {
                         {"type", "integer"},

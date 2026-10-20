@@ -19,7 +19,7 @@ struct ExecuteWriteQueryTool: MCPTool {
             ],
             "sql": [
                 "type": "string",
-                "description": "A single SQL statement to execute. Must not contain multiple statements."
+                "description": "A single SQL statement to execute. Must not contain multiple statements. Required unless 'query' is provided"
             ],
             "query": [
                 "type": "string",

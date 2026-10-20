@@ -52,7 +52,9 @@ namespace DBModels
     std::wstring MySQLAdapter::resolveSchema(const std::wstring& schema)
     {
         if (!schema.empty()) return schema;
-        return currentDatabase();
+        // DATABASE() is NULL when no default database is selected.
+        auto db = currentDatabase();
+        return isNullCell(db) ? L"" : db;
     }
 
     std::string MySQLAdapter::qualifyTable(const std::wstring& schema, const std::wstring& table)

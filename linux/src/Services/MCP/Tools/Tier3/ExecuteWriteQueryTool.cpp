@@ -36,7 +36,7 @@ public:
             {"type", "object"},
             {"properties", {
                 {"connection_id", {{"type", "string"}, {"description", "Connection identifier"}}},
-                {"sql",           {{"type", "string"}, {"description", "A single SQL statement"}}},
+                {"sql",           {{"type", "string"}, {"description", "A single SQL statement. Required unless 'query' is provided"}}},
                 {"query",         {{"type", "string"}, {"description", "A single SQL statement (alias for 'sql')"}}},
                 {"params",        {{"type", "array"},  {"description", "Parameters for placeholders"}}},
             }},
