@@ -28,14 +28,15 @@ namespace DBModels
                 {"type", "object"},
                 {"properties", {
                     {"connection_id", {{"type", "string"}, {"description", "Connection identifier"}}},
-                    {"sql",           {{"type", "string"}, {"description", "SQL query to execute"}}},
+                    {"sql",           {{"type", "string"}, {"description", "SQL query to execute. Required unless 'query' is provided"}}},
+                    {"query",         {{"type", "string"}, {"description", "SQL query to execute (alias for 'sql')"}}},
                     {"row_limit",     {
                         {"type", "integer"},
                         {"description", "Maximum rows to return (default 1000, max 10000)"},
                         {"default", 1000}, {"maximum", 10000}
                     }}
                 }},
-                {"required", {"connection_id", "sql"}}
+                {"required", {"connection_id"}}
             };
         }
         MCPToolResult execute(const nlohmann::json& params,

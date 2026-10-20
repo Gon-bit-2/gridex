@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <chrono>
 
+#include "Services/MCP/Security/SQLSanitizer.h"
 #include "Services/MCP/Tools/MCPTool.h"
 #include "Services/MCP/Tools/ToolHelpers.h"
 
@@ -22,22 +23,27 @@ public:
             {"type", "object"},
             {"properties", {
                 {"connection_id", {{"type", "string"}, {"description", "Connection identifier"}}},
-                {"sql",           {{"type", "string"}, {"description", "SQL query"}}},
+                {"sql",           {{"type", "string"}, {"description", "SQL query. Required unless 'query' is provided"}}},
+                {"query",         {{"type", "string"}, {"description", "SQL query (alias for 'sql')"}}},
                 {"params",        {{"type", "array"},  {"description", "Parameters for placeholders"}}},
                 {"row_limit",     {{"type", "integer"},
                                    {"description", "Maximum rows (default 1000, max 10000)"},
                                    {"default", 1000}, {"maximum", 10000}}},
             }},
-            {"required", nlohmann::json::array({"connection_id", "sql"})},
+            {"required", nlohmann::json::array({"connection_id"})},
         };
     }
 
     MCPToolResult execute(const nlohmann::json& params, const MCPToolContext& ctx) override {
         const std::string connectionId = MCPTool::extractConnectionId(params);
-        if (!params.contains("sql") || !params["sql"].is_string()) {
+        std::string sql;
+        if (params.contains("sql") && params["sql"].is_string()) {
+            sql = params["sql"].get<std::string>();
+        } else if (params.contains("query") && params["query"].is_string()) {
+            sql = params["query"].get<std::string>();
+        } else {
             throw MCPToolError::invalidParameters("sql is required");
         }
-        const std::string sql = params["sql"].get<std::string>();
         int rowLimit = 1000;
         if (params.contains("row_limit") && params["row_limit"].is_number_integer()) {
             rowLimit = std::clamp(params["row_limit"].get<int>(), 1, 10000);
@@ -58,11 +64,17 @@ public:
 
         auto [adapter, config] = ctx.getAdapter(connectionId);
 
+        // Only SELECT / WITH get an auto LIMIT (SHOW / DESCRIBE / PRAGMA would
+        // break). Classify on the comment/literal-stripped text so a leading
+        // comment or "(" doesn't skip the limit.
         std::string finalSql = sql;
-        std::string upper = toUpperAscii(sql);
-        if (upper.find("LIMIT") == std::string::npos && isSQL(config.databaseType)) {
+        std::string code = trimSpaces(stripCommentsAndStrings(sql));
+        auto codeStart = code.find_first_not_of("( \t\r\n");
+        std::string upper = toUpperAscii(codeStart == std::string::npos ? "" : code.substr(codeStart));
+        bool isSelectOrWith = (upper.rfind("SELECT", 0) == 0 || upper.rfind("WITH", 0) == 0);
+        if (isSelectOrWith && upper.find("LIMIT") == std::string::npos && isSQL(config.databaseType)) {
             std::string trimmed = trimSpaces(sql);
-            while (!trimmed.empty() && trimmed.back() == ';') trimmed.pop_back();
+            while (!trimmed.empty() && trimmed.back() == ';') trimmed = trimSpaces(trimmed.substr(0, trimmed.size() - 1));
             finalSql = trimmed + " LIMIT " + std::to_string(rowLimit);
         }
 

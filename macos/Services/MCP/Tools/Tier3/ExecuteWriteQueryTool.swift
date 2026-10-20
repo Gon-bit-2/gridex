@@ -19,20 +19,24 @@ struct ExecuteWriteQueryTool: MCPTool {
             ],
             "sql": [
                 "type": "string",
-                "description": "A single SQL statement to execute. Must not contain multiple statements."
+                "description": "A single SQL statement to execute. Must not contain multiple statements. Required unless 'query' is provided"
+            ],
+            "query": [
+                "type": "string",
+                "description": "A single SQL statement to execute (alias for 'sql')"
             ],
             "params": [
                 "type": "array",
                 "description": "Parameters for placeholders"
             ]
         ],
-        "required": ["connection_id", "sql"]
+        "required": ["connection_id"]
     ]
 
     func execute(params: JSONValue, context: MCPToolContext) async throws -> MCPToolResult {
         let connectionId = try extractConnectionId(from: params)
 
-        guard let sql = params["sql"]?.stringValue else {
+        guard let sql = params["sql"]?.stringValue ?? params["query"]?.stringValue else {
             throw MCPToolError.invalidParameters("sql is required")
         }
 

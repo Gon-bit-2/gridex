@@ -25,9 +25,10 @@ namespace DBModels
                 {"type", "object"},
                 {"properties", {
                     {"connection_id", {{"type", "string"}, {"description", "Connection identifier"}}},
-                    {"sql",           {{"type", "string"}, {"description", "SQL query to explain"}}}
+                    {"sql",           {{"type", "string"}, {"description", "SQL query to explain. Required unless 'query' is provided"}}},
+                    {"query",         {{"type", "string"}, {"description", "SQL query to explain (alias for 'sql')"}}}
                 }},
-                {"required", {"connection_id", "sql"}}
+                {"required", {"connection_id"}}
             };
         }
         MCPToolResult execute(const nlohmann::json& params,
